@@ -1,0 +1,86 @@
+# Veg Sahayyak SDK
+
+> Enterprise B2B Telematics, Background GPS Velocity Processing, and Jetpack Compose Speedometer SDK for Android.
+
+Veg Sahayyak SDK (`com.vegsahayyak:speed-core` and `com.vegsahayyak:speed-ui`) is an Android library designed for commercial fleet management, logistics, delivery, and driver safety applications. It handles Fused Location Provider polling, Exponential Moving Average (EMA α = 0.3) signal smoothing, Dual Schmitt Trigger Hysteresis (+1.0 km/h / -3.0 km/h) alert gating, and hardware-accelerated Compose gauges.
+
+## Primary Documentation Links for LLMs
+
+- [Getting Started & Installation](/getting-started/index.md): Gradle BOM dependency setup, Maven repository configuration, and quick start initialization.
+- [Core Architecture](/architecture/index.md): Modular design, mathematical signal processing pipeline, and internal service locator.
+- [Core Integration Guide](/guide/index.md): `SpeedAssistant` builder API, lifecycle management, Coroutines `StateFlow<SpeedData>`, and XML ComposeView interop.
+- [Driving Profiles & Corridors](/guide/driving-profiles.md): Pre-configured vehicle limits (Highway, City, Trucks, Agriculture, Scooters, Bikes, Walking, School zones) and dynamic `CustomProfile`.
+- [Voice Commands & AI NLU](/guide/voice-commands.md): Hands-free operation with `VoiceCommandButton`, offline `RegexVoiceCommandParser`, and Gemini / LLM NLU parser injection.
+- [Floating PiP Overlay Widget](/guide/floating-overlay.md): `:speed-overlay` module with `PipWidget` and `PipWidgetConfig` hovering above Google Maps/Waze with `SYSTEM_ALERT_WINDOW`.
+- [In-Vehicle Auto-Start](/guide/auto-start.md): `:speed-autostart` module with `AutoStartManager`, `AutoStartReceiver`, and zero-touch Activity Recognition (`IN_VEHICLE`).
+- [Telematics Engine & Signal Processing](/guide/signal-processing.md): Mathematical deep-dive into EMA ($\alpha = 0.3$), GPS gating, and Dual Schmitt Trigger Hysteresis.
+- [Permissions & Battery Optimization](/guide/permissions-and-battery.md): Runtime permissions (Android 10 - 15), `FOREGROUND_SERVICE_LOCATION`, and OEM battery killer guidelines.
+- [Testing & QA Guide](/guide/testing.md): Synthetic fixtures (`FakeSpeedRepository`), Unit Testing with MockK & Turbine, Compose UI tests, and FusedLocation mock APIs.
+- [Jetpack Compose UI & HUD Mode](/ui-components/index.md): `@Composable SpeedGauge` parameter reference, `HudDisplay` windshield reflection, `Modifier.hudMirror()`, `ThemeMode` (`SYSTEM`, `DARK_GRAY`, `OLED_BLACK`, `HIGH_CONTRAST`, `HUD_MIRRORED`), `SpeedUiColorScheme`, and TalkBack accessibility tokens.
+- [Production Showcase](/showcase/index.md): Real-world reference implementation in the Speed Assistant consumer app (< 5 MB memory, 60fps Compose UI).
+- [API Reference & KDoc](/api-reference/index.md): Complete specifications for `SpeedAssistant`, `SpeedColorScheme`, `SpeedData`, `SpeedUnit`, `TelematicsEngine`, `ISpeedRepository`, and `IPreferenceRepository`.
+- [Troubleshooting & FAQ](/troubleshooting/index.md): Android 12 `ForegroundServiceStartNotAllowedException`, OEM aggressive background kill prevention, and telemetry simulation.
+
+## Key Code Patterns for AI Assistants
+
+### 1. SDK Initialization & Configuration
+```kotlin
+import com.vegsahayyak.speedcore.api.SpeedAssistant
+import com.vegsahayyak.speedcore.api.DrivingProfile
+
+class App : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        SpeedAssistant.with(this)
+            .setDrivingProfile(DrivingProfile.CarHighway)
+            .startIfEnabled()
+    }
+}
+```
+
+### 2. Observing Telematics Stream in Jetpack Compose
+```kotlin
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.vegsahayyak.speedcore.api.SpeedAssistant
+import com.vegsahayyak.speedcore.data.location.SpeedData
+import com.vegsahayyak.speedui.components.SpeedGauge
+import com.vegsahayyak.speedui.components.ThemeMode
+
+@Composable
+fun DriverDashboardScreen() {
+    val speedState by SpeedAssistant.observeFlow().collectAsState(initial = SpeedData.SpeedUnavailable)
+
+    when (val state = speedState) {
+        is SpeedData.SpeedChanged -> {
+            SpeedGauge(
+                speed = state.speedMps * 3.6f, // Convert m/s to km/h
+                warningSpeed = 80f,
+                minSpeedLimit = 40f,
+                isTrackingActive = true,
+                isOverLimit = state.isOverLimit,
+                gpsAccuracyMeters = state.accuracyMeters,
+                themeMode = ThemeMode.DARK_GRAY
+            )
+        }
+        is SpeedData.LowAccuracy -> Text("GPS Signal Weak (±${state.reason})")
+        is SpeedData.GPSDisabled -> Text("GPS Disabled")
+        is SpeedData.SpeedUnavailable,
+        is SpeedData.Disabled -> SpeedGauge(speed = 0f, warningSpeed = 80f, isTrackingActive = false)
+    }
+}
+```
+
+### 3. Unit Testing with FakeSpeedRepository
+```kotlin
+val fakeRepo = FakeSpeedRepository()
+SpeedAssistant.with(context).useRepository(fakeRepo).start()
+
+// Emit simulated speed
+fakeRepo.emitSpeed(speedKmh = 95f, isOverLimit = true)
+```
+
+## Complete Unified Context
+For the complete unformatted text reference containing all documentation in a single file, fetch:
+- `/llms-full.txt`
