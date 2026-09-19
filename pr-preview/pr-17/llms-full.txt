@@ -1,0 +1,3504 @@
+# Veg Sahayyak SDK Full Documentation
+
+This file contains the complete, concatenated documentation for the Veg Sahayyak SDK.
+
+--- START OF FILE: api-reference/index.md ---
+
+# API Reference & KDoc
+
+Complete Kotlin API specifications for public interfaces, builders, and data models in the **Veg Sahayyak SDK**.
+
+---
+
+## 🚀 `SpeedAssistant`
+
+<ApiTag type="service">Singleton Builder</ApiTag> `package com.vegsahayyak.speedcore.api`
+
+The primary entry point to the telematics engine.
+
+### Builder & Lifecycle Methods
+
+#### `companion object.with(context: Context): SpeedAssistant`
+Retrieves or instantiates the singleton instance of `SpeedAssistant`. Automatically initializes core dependencies.
+
+#### `setWarningSpeedThreshold(limitInUserUnit: Float): SpeedAssistant`
+Sets the maximum speed ceiling. Converts user units to SI meters/second and updates `TelematicsEngine`.
+
+#### `setMinWarningSpeedThreshold(limitInUserUnit: Float): SpeedAssistant`
+Sets the minimum speed corridor limit.
+
+#### `setDrivingProfile(profile: DrivingProfile): SpeedAssistant`
+Applies a pre-configured or dynamic `DrivingProfile` and automatically resolves the ideal max and min speed limits according to the user's active unit.
+
+#### `setWarningPendingIntent(intent: PendingIntent): SpeedAssistant`
+Configures the `PendingIntent` fired when the driver breaks the speed threshold.
+
+#### `setColorScheme(colorScheme: SpeedColorScheme): SpeedAssistant`
+Configures custom brand colors for system notifications and alerts across the SDK.
+
+#### `useRepository(repository: ISpeedRepository): SpeedAssistant`
+Overrides the internal default `SpeedRepositoryImpl` with a custom implementation or test double (e.g. `FakeSpeedRepository`).
+
+#### `usePreferenceRepository(repository: IPreferenceRepository): SpeedAssistant`
+Overrides the internal persistent preferences repository with a custom implementation.
+
+#### `val tracker: ISpeedRepository`
+Direct accessor to the active speed repository instance.
+
+#### `val preferences: IPreferenceRepository`
+Direct accessor to the active persistent preferences repository instance.
+
+#### `start()`
+Starts the `SpeedometerService` foreground service and begins Fused Location Provider polling.
+
+#### `startIfEnabled(): Boolean`
+Checks user preferences and restarts the tracking service only if it was previously active. Returns `true` if started.
+
+#### `stop()`
+Halts the foreground service, removes location updates, and resets the `TelematicsEngine`.
+
+#### `companion object.observeFlow(): Flow<SpeedData>`
+Returns a Kotlin Coroutines `Flow` of real-time telematics updates.
+
+---
+
+## 🎨 `SpeedColorScheme` & `SpeedUiColorScheme`
+
+<ApiTag type="model">Color Models</ApiTag> `package com.vegsahayyak.speedcore.api` / `package com.vegsahayyak.speedui.components`
+
+Data classes for branding SDK alerts and UI components.
+
+```kotlin
+data class SpeedColorScheme(
+    @ColorInt val safeColor: Int = 0xFF00E676.toInt(),
+    @ColorInt val warningApproachColor: Int = 0xFFFF9100.toInt(),
+    @ColorInt val overSpeedColor: Int = 0xFFFF1744.toInt(),
+    @ColorInt val underSpeedColor: Int = 0xFF00E5FF.toInt(),
+    @ColorInt val warningGlowColor: Int = 0x88FF1744.toInt(),
+    @ColorInt val needleColor: Int = 0xFF2979FF.toInt()
+)
+
+data class SpeedUiColorScheme(
+    val safeColor: Color = Color(0xFF00E676),
+    val warningApproachColor: Color = Color(0xFFFF9100),
+    val overSpeedColor: Color = Color(0xFFFF1744),
+    val underSpeedColor: Color = Color(0xFF00E5FF),
+    val warningGlowColor: Color = Color(0x88FF1744),
+    val needleColor: Color = Color(0xFF2979FF)
+)
+```
+
+---
+
+## 📡 `SpeedData` (Sealed Hierarchy)
+
+<ApiTag type="model">Data Sealed Interface</ApiTag> `package com.vegsahayyak.speedcore.data.location`
+
+```kotlin
+sealed interface SpeedData {
+    data class SpeedChanged(
+        val speedMps: Float,
+        val isOverLimit: Boolean,
+        val isUnderLimit: Boolean = false,
+        val accuracyMeters: Float
+    ) : SpeedData
+
+    data class LowAccuracy(
+        val reason: String
+    ) : SpeedData
+
+    object GPSDisabled : SpeedData
+    object SpeedUnavailable : SpeedData
+    object Disabled : SpeedData
+}
+```
+
+---
+
+## 📏 `SpeedUnit`
+
+<ApiTag type="model">Enum</ApiTag> `package com.vegsahayyak.speedcore.units`
+
+| Enum Constant | Label | MPS Conversion Factor | Gauge Max Scale | Major Step |
+| :--- | :--- | :--- | :--- | :--- |
+| `KILOMETERS_PER_HOUR` | `km/h` | 3.6 × mps | 180 | 20 |
+| `METERS_PER_SECOND` | `m/s` | 1.0 × mps | 50 | 10 |
+| `MILES_PER_HOUR` | `mph` | 2.23694 × mps | 120 | 20 |
+| `FEET_PER_SECOND` | `ft/s` | 3.28084 × mps | 160 | 20 |
+
+### Methods
+* `convertSpeed(metersPerSecond: Float): Float`: Converts SI meters per second to the target unit.
+* `convertToMetersPerSecond(speedInUnit: Float): Float`: Converts user-unit speed to SI m/s.
+
+---
+
+## ⚙️ `TelematicsEngine`
+
+<ApiTag type="model">Internal Domain</ApiTag> `package com.vegsahayyak.speedcore.domain`
+
+Performs mathematical signal smoothing and state machine transitions.
+
+```kotlin
+data class TelematicsResult(
+    val smoothedSpeedMps: Float,
+    val isOverLimit: Boolean,
+    val isUnderLimit: Boolean,
+    val accuracyMeters: Float
+)
+```
+
+* `processLocation(rawSpeedMps: Float, accuracyMeters: Float): TelematicsResult?`: Applies accuracy confidence gating (25m), Exponential Moving Average (α = 0.3), and Schmitt Trigger Hysteresis (+1.0 km/h / -3.0 km/h). Returns `null` if precision is insufficient.
+* `reset()`: Flushes historical momentum states.
+
+---
+
+## 🗄️ `ISpeedRepository` & `IPreferenceRepository`
+
+<ApiTag type="model">Interface Abstraction</ApiTag> `package com.vegsahayyak.speedcore.api`
+
+Repository abstractions allowing custom mock implementations for unit testing or integration testing.
+
+```kotlin
+interface ISpeedRepository {
+    fun observeSpeed(): Flow<SpeedData>
+    fun isEnable(): Boolean
+    fun isLocationAvailable(): Boolean
+    fun toggle(boolean: Boolean)
+    fun enable()
+    fun disable()
+}
+
+interface IPreferenceRepository {
+    fun isRunning(): Boolean
+    fun setRunning(value: Boolean)
+    fun getUnit(): SpeedUnit
+    fun setUnit(unit: SpeedUnit)
+    fun isFirstRun(): Boolean
+    fun setFirstRun(value: Boolean)
+    fun getUpdateWhileScreenOff(): Boolean
+    fun setUpdateWhileScreenOff(value: Boolean)
+    fun getWarningSpeedThreshold(): Float
+    fun setWarningSpeedThreshold(value: Float)
+    fun getMinWarningSpeedThreshold(): Float
+    fun setMinWarningSpeedThreshold(value: Float)
+    fun setLocationPermissionRequested(value: Boolean)
+    fun getLocationPermissionRequested(): Boolean
+}
+```
+
+---
+
+## 🪟 `PipWidget` & `PipWidgetConfig`
+
+<ApiTag type="ui">Composable / Model</ApiTag> `package com.vegsahayyak.speedoverlay`
+
+A floating, compact Picture-in-Picture (PiP) style speedometer designed to render over other apps (such as navigation or delivery apps) using `SYSTEM_ALERT_WINDOW`.
+
+```kotlin
+@Composable
+fun PipWidget(
+    speed: Float,
+    unitLabel: String,
+    isOverLimit: Boolean,
+    modifier: Modifier = Modifier,
+    isUnderLimit: Boolean = false,
+    config: PipWidgetConfig = PipWidgetConfig()
+)
+```
+
+```kotlin
+data class PipWidgetConfig(
+    val size: Dp = 100.dp,
+    val safeColor: Color = Color(0xFF1FC95E),
+    val warningColor: Color = Color(0xFFE31D23),
+    val underSpeedColor: Color = Color(0xFF29B6F6),
+    val backgroundColor: Color = Color(0x66000000), // Translucent dark glass
+    val speedTextSize: TextUnit = 36.sp,
+    val unitTextSize: TextUnit = 14.sp,
+    val textColor: Color = Color.White
+)
+```
+
+---
+
+## 🚗 `AutoStartManager`
+
+<ApiTag type="service">Plugin Utility</ApiTag> `package com.vegsahayyak.speedautostart`
+
+Manager object providing zero-friction background trip detection using Google Play Services Activity Recognition API.
+
+```kotlin
+object AutoStartManager {
+    fun enable(
+        context: Context,
+        onPermissionRequired: () -> Unit,
+        onSuccess: () -> Unit,
+        onError: (Exception) -> Unit
+    )
+}
+```
+
+---
+
+## 🚗 `DrivingProfile`
+
+<ApiTag type="model">Sealed Class</ApiTag> `package com.vegsahayyak.speedcore.api`
+
+Pre-configured speed limit profiles for various vehicle classes and environments.
+
+```kotlin
+sealed class DrivingProfile {
+    abstract val maxKmh: Float
+    abstract val minKmh: Float
+    abstract val maxMph: Float
+    abstract val minMph: Float
+
+    fun getMaxLimit(unit: SpeedUnit): Float
+    fun getMinLimit(unit: SpeedUnit): Float
+
+    object CarHighway : DrivingProfile()          // Max 120 km/h / 75 mph, Min 60 km/h / 40 mph
+    object CarCity : DrivingProfile()             // Max 50 km/h / 30 mph, Min 0
+    object Motorcycle : DrivingProfile()          // Max 120 km/h / 75 mph, Min 0
+    object TruckHighway : DrivingProfile()        // Max 90 km/h / 60 mph, Min 50 km/h / 30 mph
+    object BusCoach : DrivingProfile()            // Max 100 km/h / 65 mph, Min 50 km/h / 30 mph
+    object TractorAgricultural : DrivingProfile() // Max 40 km/h / 25 mph, Min 0
+    object EScooter : DrivingProfile()            // Max 20 km/h / 12.5 mph, Min 0
+    object Bicycle : DrivingProfile()             // Max 25 km/h / 15 mph, Min 0
+    object Walking : DrivingProfile()             // Max 8 km/h / 5 mph, Min 0
+    object SchoolZone : DrivingProfile()          // Max 30 km/h / 20 mph, Min 0
+
+    data class CustomProfile(
+        val maxLimit: Float,
+        val minLimit: Float,
+        val unit: SpeedUnit
+    ) : DrivingProfile()
+}
+```
+
+---
+
+## 🏎️ `SpeedGauge` & UI Models
+
+<ApiTag type="ui">Composable / Models</ApiTag> `package com.vegsahayyak.speedui.components` / `package com.vegsahayyak.speedui.models`
+
+Stateless hardware-accelerated speedometer gauge rendering with dynamic color schemes, theme presets, and screen reader accessibility.
+
+```kotlin
+enum class ThemeMode {
+    SYSTEM,        // Follows system light/dark theme
+    DARK_GRAY,     // Deep charcoal slate
+    OLED_BLACK,    // Pure #000000 true black for OLED battery conservation
+    HIGH_CONTRAST, // High-visibility bright yellow/white for direct sunlight
+    HUD_MIRRORED   // Vertically inverted reflection mode
+}
+
+enum class UiSpeedUnit(val label: String) {
+    KMH("km/h"),
+    MPH("mph"),
+    MPS("m/s"),
+    FPS("ft/s")
+}
+
+@Composable
+fun SpeedGauge(
+    speed: Float,
+    warningSpeed: Float,
+    isTrackingActive: Boolean,
+    isOverLimit: Boolean = false,
+    modifier: Modifier = Modifier,
+    minSpeedLimit: Float = 0f,
+    maxSpeed: Float = SpeedGaugeTokens.DefaultMaxSpeed,
+    unitLabel: String = "km/h",
+    unitOptions: List<UiSpeedUnit> = UiSpeedUnit.entries,
+    labelStep: Int = 20,
+    onUnitSelected: ((Int) -> Unit)? = null,
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    colorScheme: SpeedUiColorScheme? = null,
+    showGpsAccuracy: Boolean = true,
+    gpsAccuracyMeters: Float = -1f,
+    isHudMirrored: Boolean = false
+)
+```
+
+---
+
+## 🌙 `HudDisplay` & `Modifier.hudMirror`
+
+<ApiTag type="ui">Composable / Modifier</ApiTag> `package com.vegsahayyak.speedui.components`
+
+Dedicated nighttime windshield projection component and transformation modifiers.
+
+```kotlin
+enum class HudMirrorAxis {
+    VERTICAL,
+    HORIZONTAL,
+    BOTH
+}
+
+fun Modifier.hudMirror(
+    isMirrored: Boolean = true,
+    axis: HudMirrorAxis = HudMirrorAxis.VERTICAL
+): Modifier
+
+@Composable
+fun HudDisplay(
+    speed: Float,
+    warningSpeed: Float,
+    isTrackingActive: Boolean,
+    modifier: Modifier = Modifier,
+    minSpeedLimit: Float = 0f,
+    isOverLimit: Boolean = false,
+    unitLabel: String = "km/h",
+    unitOptions: List<UiSpeedUnit> = UiSpeedUnit.entries,
+    onUnitSelected: ((Int) -> Unit)? = null,
+    isMirrored: Boolean = true,
+    onToggleMirror: (() -> Unit)? = null,
+    mirrorAxis: HudMirrorAxis = HudMirrorAxis.VERTICAL,
+    colorScheme: SpeedUiColorScheme? = null,
+    showGpsAccuracy: Boolean = true,
+    gpsAccuracyMeters: Float = -1f
+)
+```
+
+---
+
+## 🎙️ `VoiceCommandButton` & `VoiceCommandParser`
+
+<ApiTag type="ui">Composable / Parser</ApiTag> `package com.vegsahayyak.speedui.components` / `package com.vegsahayyak.speedui.api`
+
+Hands-free STT transcription button and speech-intent parser interfaces.
+
+```kotlin
+sealed class VoiceAction {
+    data class SetProfile(val profile: DrivingProfile) : VoiceAction()
+    data class ChangeUnit(val unitName: String) : VoiceAction()
+    object Unknown : VoiceAction()
+}
+
+interface VoiceCommandParser {
+    suspend fun parse(text: String): VoiceAction?
+    
+    companion object {
+        fun parse(text: String): VoiceAction
+    }
+}
+
+@Composable
+fun VoiceCommandButton(
+    parser: VoiceCommandParser? = null,
+    onCommandParsed: (VoiceAction) -> Unit,
+    modifier: Modifier = Modifier
+)
+```
+
+
+
+
+--- END OF FILE: api-reference/index.md ---
+
+
+--- START OF FILE: architecture/index.md ---
+
+# Architecture Overview
+
+The **Veg Sahayyak SDK** is engineered around a clean, decoupled, and framework-agnostic architecture. This ensures high-accuracy telematics processing in background environments without imposing dependency injection frameworks (like Hilt or Koin) onto host applications.
+
+---
+
+## 🏛️ Modular Design
+
+The SDK is strictly modularized into 5 components to enforce separation of concerns and enable flexible, lightweight B2B integration:
+
+<ArchitectureFlow />
+
+### Module Responsibilities
+
+| Module | Namespace | Role |
+| :--- | :--- | :--- |
+| **`speed-core`** | `com.vegsahayyak.speedcore` | **Headless Engine**: Location tracking, `TelematicsEngine` signal processing, Foreground Service, `SpeedColorScheme`, persistent preferences, and repository contracts. **Crucially, this module is entirely headless and contains zero Jetpack Compose or UI dependencies.** |
+| **`speed-ui`** | `com.vegsahayyak.speedui` | **Jetpack Compose UI**: Production-ready, animated `SpeedGauge` canvas component, `HudDisplay` night windshield projection, and `SpeedUiColorScheme`. All UI rendering is fully delegated here. |
+| **`speed-overlay`** | `com.vegsahayyak.speedoverlay` | **Floating PiP Overlay**: Lightweight floating Picture-in-Picture window for persistent speed display over third-party navigation apps. |
+| **`speed-autostart`** | `com.vegsahayyak.speedautostart` | **Zero-Touch Autostart**: Seamless background trip detection via Google Play Activity Recognition (`IN_VEHICLE` transitions). |
+| **`speed-bom`** | `com.vegsahayyak.speedbom` | **Bill of Materials**: Aligns module versioning (v2.1.0) so clients never encounter runtime ABI mismatches. |
+
+---
+
+## 📐 Signal Processing & Telematics Engine
+
+GPS hardware sensors on mobile devices frequently produce velocity noise spikes, multipath signal reflections, and intermittent signal drift (especially in urban canyons or under bridges). The `TelematicsEngine` in `speed-core` applies a multi-stage mathematical pipeline before emitting speed updates.
+
+<TelemetrySimulator />
+
+### 1. Accuracy Confidence Gating
+Raw GPS fixes with an estimated horizontal accuracy greater than **25.0 meters** (or missing speed precision) are discarded:
+
+::: info 🎯 Gating Rule
+```text
+Accept GPS Fix IF: horizontalAccuracy <= 25.0 meters
+```
+:::
+
+When a reading is rejected, the engine emits `SpeedData.LowAccuracy`, preventing erratic spikes while preserving the last valid smoothed speed.
+
+---
+
+### 2. Exponential Moving Average (EMA)
+To eliminate abrupt needle shaking while retaining immediate responsiveness to actual vehicle acceleration, the engine applies an **Exponential Moving Average** with smoothing factor **α = 0.3**:
+
+::: info 📐 Mathematical Smoothing Formula
+```text
+S_t = (α · Y_t) + ((1 - α) · S_{t-1})
+```
+* **`S_t`**: Smoothed speed at timestamp $t$ (in meters/second).
+* **`Y_t`**: Raw velocity reading from the GPS provider.
+* **`S_{t-1}`**: Previous smoothed speed state.
+* **`α = 0.3`**: Weighting coefficient (30% new sample, 70% historical momentum).
+:::
+
+---
+
+### 3. Dual Schmitt Trigger Hysteresis (Max & Min Limits)
+A major problem with standard telematics alerting is **alarm flutter** (e.g. at `80.1 km/h` the alarm fires, at `79.9 km/h` it shuts off, causing rapid flickering and annoying audio chatter).
+
+The SDK's `TelematicsEngine` implements a **Dual Schmitt Trigger Hysteresis** state machine covering both **Maximum Speed Limits** and **Minimum Speed Corridors**. These dynamic limits are no longer set manually; they are now **automatically fed by the selected `DrivingProfile`** (e.g. `CarHighway`, `EScooter`):
+
+<SchmittHysteresisDiagram />
+
+#### A. Maximum Speed Ceiling Hysteresis
+* **Trigger Threshold**: Warning activates when `Speed > MaxLimit + 1.0 km/h` (`+0.278 m/s`).
+* **Dismissal Threshold**: Warning deactivates when `Speed < MaxLimit - 3.0 km/h` (`-0.833 m/s`).
+* **Result**: Sets `isOverLimit = true` in `SpeedData.SpeedChanged`.
+
+#### B. Minimum Speed Corridor Hysteresis
+* **Startup Safety Guard (`hasReachedSafeSpeed`)**: Prevents false under-speed alarms when the vehicle is stationary or starting from a parking stop until it first accelerates past `MinLimit + 3.0 km/h`.
+* **Trigger Threshold**: Warning activates when driving speed drops below `Speed < MinLimit - 1.0 km/h` (`-0.278 m/s`).
+* **Dismissal Threshold**: Warning deactivates once speed recovers above `Speed > MinLimit + 3.0 km/h` (`+0.833 m/s`).
+* **Result**: Sets `isUnderLimit = true` in `SpeedData.SpeedChanged`.
+
+---
+
+## 🔋 Foreground Service & Battery Optimization
+
+Continuous GPS monitoring can drain mobile battery rapidly. The SDK provides advanced power-conservation strategies:
+
+<BatterySequenceFlow />
+
+1. **`AutoStartManager` (`:speed-autostart`)**: This is the new recommended strategy for battery optimization. By utilizing Google Play Services `IN_VEHICLE` transitions, it detects when a trip starts or stops using the low-power sensor hub, bypassing OEM background killers without relying on continuous GPS polling.
+2. **`ScreenStateWatcher`**: Dynamically observes display state. If the host application configures `updateWhileScreenOff = false`, the GPS hardware is immediately turned off when the screen sleeps, reducing power consumption by up to **68%**.
+3. **Dynamic Status Bar Icons**: Speed is rendered directly into the system status bar as a vector numeric drawable, allowing drivers to monitor speed without keeping the screen active.
+
+---
+
+👉 **Next Step:** Explore the [Core Integration Guide](/guide/) to initialize the SDK and collect live telematics streams.
+
+
+--- END OF FILE: architecture/index.md ---
+
+
+--- START OF FILE: changelog/index.md ---
+
+# Changelog & Version Matrix
+
+Track releases, breaking architectural migrations, and upcoming feature roadmap for the **Veg Sahayyak SDK**.
+
+---
+
+## 🏷️ Version Matrix & Release History
+
+| Version | Status | Release Date | Target Android SDK | Highlights |
+| :--- | :--- | :--- | :--- | :--- |
+| **`v2.1.0`** | 🟢 **Current Stable** | August 2026 | API 23 - 37 | Voice Commands, Driving Profiles, Decoupled UI, PiP, HUD, Auto-start, JaCoCo Quality Gates. |
+| **`v2.0.2`** | 🟡 Supported | August 2026 | API 23 - 37 | Exponential Moving Average (α = 0.3), Schmitt Trigger Hysteresis, Compose UI `SpeedGauge` tokens. |
+| **`v2.0.0`** | 🟡 Supported | July 2026 | API 23 - 37 | Architectural Migration to modular SDK (`:speed-core`, `:speed-ui`, `:speed-bom`), GitHub Packages Maven distribution. |
+| **`v1.2.0`** | 🔴 Deprecated | March 2026 | API 21 - 34 | Legacy monolithic Android application architecture. |
+
+---
+
+## 🚀 v2.1.0 (Latest Stable)
+
+### 🌟 New Features & Enhancements
+* **Voice Commands & Driving Profiles**:
+  * Introduced `VoiceCommandButton` and `VoiceCommandParser` for hands-free mode switching.
+  * Replaced manual limit configuration with legal `DrivingProfile` bounds (e.g. `CarHighway`, `SchoolZone`).
+* **Client Theme & Color Scheme Injection**:
+  * Added `SpeedColorScheme` (`:speed-core`) and `SpeedUiColorScheme` (`:speed-ui`) allowing host apps to inject custom brand colors.
+  * Propagates brand colors across `SpeedGauge`, `HudDisplay`, `PipWidget`, and foreground `NotificationProvider`.
+* **HUD Windshield Reflection Mode**:
+  * Added `Modifier.hudMirror()` for vertical/horizontal axis transformations.
+  * Added `HudDisplay` standalone composable with true OLED black (`#000000`) background and high-visibility 120sp typography.
+  * Integrated HUD mirroring into `SpeedGauge` and `ThemeMode.HUD_MIRRORED`.
+* **Decoupled Architecture Modules**:
+  * `:speed-overlay`: Standalone floating Picture-in-Picture speedometer widget (`PipWidget`).
+  * `:speed-autostart`: Zero-touch background trip detection via Google Play Activity Recognition (`AutoStartManager`).
+
+### 🐛 Bug Fixes
+* **False Minimum Speed Alarms**: Implemented 8 km/h Stationary Suppression in `TelematicsEngine`. The under-speed alarm is now aggressively silenced when the vehicle is in heavy traffic or navigating speed bumps.
+* **API 25 Crash Fix**: Resolved `VectorDrawable` inflation crashes on Android Nougat (API 25).
+* **AAPT2 String Errors**: Fixed missing localized string resources triggering AAPT2 compilation failures during `:app` assembly.
+
+* **CI/CD Quality Gates & Coverage**:
+  * Aggregated multi-module JaCoCo coverage reporting (`jacoco.gradle.kts`).
+  * Verified full ProGuard consumer rules and zero-warning Lint passes.
+
+---
+
+## 🚀 v2.0.2
+
+### 🌟 New Features & Enhancements
+* **`TelematicsEngine` Signal Pipeline**:
+  * Implemented Exponential Moving Average (EMA) with **α = 0.3** smoothing to eliminate jitter from raw GPS sensor readings.
+  * Added confidence gating to automatically discard GPS fixes exceeding **25.0m** inaccuracy.
+  * Introduced Dual Schmitt Trigger Hysteresis (**+1.0 km/h** alert, **-3.0 km/h** dismissal) to prevent alarm fluttering.
+* **Jetpack Compose UI Gallery (`:speed-ui`)**:
+  * Added hardware-accelerated `SpeedGauge` canvas component with smooth 60fps needle animations.
+  * Added high-contrast and OLED dark theme presets.
+  * Integrated real-time GPS accuracy pill badge (`Good`, `Fair`, `Weak`).
+* **Bill of Materials (`:speed-bom`)**:
+  * Added Gradle platform BOM artifact for aligned SDK dependency resolution.
+
+---
+
+## 🔄 Migration Guide: v1.x → v2.0.x
+
+Version 2.0 represents a major architectural overhaul, splitting the codebase into modular SDK components:
+
+### 1. Update Gradle Dependencies
+Replace legacy monolithic imports with the modular BOM:
+
+```kotlin
+// Old (v1.x)
+implementation("com.vegsahayyak:speed-assistant:1.2.0")
+
+// New (v2.x Modular)
+implementation(platform("com.vegsahayyak:speed-bom:2.0.2"))
+implementation("com.vegsahayyak:speed-core")
+implementation("com.vegsahayyak:speed-ui")
+```
+
+### 2. Update Initialization Pattern
+Replace static singleton access with the manual service locator builder:
+
+```kotlin
+// Old (v1.x)
+SpeedAssistantManager.getInstance().start(context)
+
+// New (v2.x)
+SpeedAssistant.with(context)
+    .setDrivingProfile(DrivingProfile.CarHighway)
+    .start()
+```
+
+---
+
+## 🔮 Upcoming: v2.2.0 Roadmap Teaser
+
+The upcoming `v2.2.0` release will introduce further enterprise telematics capabilities:
+
+* **Dynamic Speed Limit Ingestion**: Cloud-synced geofenced speed limit lookup for corridor fleet management.
+* **Stationary Suppression & Acceleration Grace Periods**: Dynamic stationary filtering (< 5 km/h) and acceleration ramp grace period gating.
+
+
+--- END OF FILE: changelog/index.md ---
+
+
+--- START OF FILE: getting-started/index.md ---
+
+# Getting Started
+
+Welcome to the **Veg Sahayyak SDK** integration guide. This document guides you through configuring your Android build, authenticating with GitHub Packages, declaring dependencies, and executing your first background telematics tracking session.
+
+---
+
+## 📋 Minimum Requirements
+
+Before integrating the SDK, ensure your project environment meets the following specifications:
+
+| Requirement | Minimum Supported | Recommended Target |
+| :--- | :--- | :--- |
+| **Android Minimum SDK (`minSdk`)** | API 23 (Android 6.0) | API 26 (Android 8.0+) |
+| **Android Target SDK (`targetSdk`)** | API 34 | API 35 / API 37 |
+| **Kotlin Version** | 1.9.20+ | 2.0.0+ / 2.2.0 |
+| **JDK Version** | Java 17 | Java 21 |
+| **Jetpack Compose** | 2024.04.00 (BOM) | Latest Stable Compose BOM |
+
+---
+
+## 🔑 1. Authentication with GitHub Packages
+
+Veg Sahayyak SDK artifacts are distributed privately via **GitHub Packages Maven Registry**. To resolve dependencies, you must supply a GitHub Personal Access Token (PAT) with `read:packages` scope.
+
+### Step A: Configure Authentication Credentials
+We strongly recommend storing your credentials securely in your `local.properties` file or environment variables to avoid checking secrets into version control:
+
+```properties [local.properties]
+# In your project's local.properties (git-ignored)
+gpr.user=YOUR_GITHUB_USERNAME
+gpr.key=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+### Step B: Add Repository to Gradle
+
+Add the registry to your `settings.gradle.kts` (or root `build.gradle.kts`):
+
+::: code-group
+
+```kotlin [settings.gradle.kts (Kotlin DSL)]
+import java.util.Properties
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        
+        // Veg Sahayyak SDK Private Registry
+        maven {
+            name = "VegSahayyakSDK"
+            url = uri("https://maven.pkg.github.com/VegSahayyak/veg-sahayyak-sdk")
+            credentials {
+                val localProps = Properties().apply {
+                    val file = rootProject.file("local.properties")
+                    if (file.exists()) file.inputStream().use { load(it) }
+                }
+                username = System.getenv("GITHUB_ACTOR") 
+                    ?: localProps.getProperty("gpr.user") 
+                    ?: (project.findProperty("gpr.user") as String?)
+                password = System.getenv("GITHUB_TOKEN") 
+                    ?: localProps.getProperty("gpr.key") 
+                    ?: (project.findProperty("gpr.key") as String?)
+            }
+        }
+    }
+}
+```
+
+```groovy [settings.gradle (Groovy DSL)]
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        
+        maven {
+            name = "VegSahayyakSDK"
+            url = uri("https://maven.pkg.github.com/VegSahayyak/veg-sahayyak-sdk")
+            credentials {
+                username = System.getenv("GITHUB_ACTOR") ?: project.findProperty("gpr.user")
+                password = System.getenv("GITHUB_TOKEN") ?: project.findProperty("gpr.key")
+            }
+        }
+    }
+}
+```
+
+:::
+
+---
+
+## 📦 2. Dependency Declaration
+
+The SDK is divided into modular artifacts. Using the **Bill of Materials (BOM)** is the recommended approach to guarantee version alignment.
+
+::: code-group
+
+```kotlin [app/build.gradle.kts (Recommended with BOM)]
+dependencies {
+    // 1. Import the Veg Sahayyak BOM
+    implementation(platform("com.vegsahayyak:speed-bom:2.1.0"))
+
+    // 2. Core headless tracking, FusedLocation & TelematicsEngine
+    implementation("com.vegsahayyak:speed-core")
+
+    // 3. Optional Compose UI components (SpeedGauge, HudDisplay, Themes)
+    implementation("com.vegsahayyak:speed-ui")
+
+    // 4. Optional PiP floating speedometer overlay widget
+    implementation("com.vegsahayyak:speed-overlay")
+
+    // 5. Optional automatic zero-touch trip start via Activity Recognition
+    implementation("com.vegsahayyak:speed-autostart")
+}
+```
+
+```kotlin [app/build.gradle.kts (Pure Headless / XML View-Only)]
+dependencies {
+    // For non-Compose projects: import only the core telematics engine
+    implementation(platform("com.vegsahayyak:speed-bom:2.1.0"))
+    implementation("com.vegsahayyak:speed-core")
+    // Zero Compose dependencies added to your project!
+}
+```
+
+:::
+
+> [!TIP]
+> **XML Layouts & ViewBinding Support**: If your application is built with traditional XML layouts rather than Jetpack Compose, you have two options:
+> 1. **Headless XML Binding:** Import only `:speed-core` and bind `SpeedAssistant.observeFlow()` to standard `TextView` and `ProgressBar` widgets.
+> 2. **ComposeView Interop:** Import `:speed-ui` and embed `<androidx.compose.ui.platform.ComposeView>` directly inside your XML layout file. See the [XML Integration Guide](/guide/#traditional-xml-viewbinding-integration).
+
+---
+
+## 🛡️ 3. Android Manifest Permissions
+
+The SDK requires standard Android Location and Foreground Service permissions. Add the following to your `app/src/main/AndroidManifest.xml`:
+
+```xml [AndroidManifest.xml]
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Fine and Coarse GPS Permissions -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Android 10+ Background Location (for persistent fleet tracking) -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- Android 14+ Foreground Service Location Type -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+    <!-- Android 13+ Notification Post Permission -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Audio & Haptics for Alarm Alerts -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Optional: For PIP Widget / Floating Overlay -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Optional: For Activity Recognition (Auto-Start) (Android 10+) -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
+    <!-- Optional: For Voice Commands -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+</manifest>
+```
+
+> [!NOTE]
+> The SDK's `speed-core` module includes the `SpeedometerService` pre-configured in its internal Android Manifest with `android:foregroundServiceType="location"`. You do not need to redeclare the service in your app manifest.
+
+---
+
+## 🔒 4. ProGuard & R8 Optimization Rules
+
+If your application enables code obfuscation (`minifyEnabled = true`), the SDK includes consumer Proguard rules automatically. If needed, you can explicitly verify these rules:
+
+```properties [proguard-rules.pro]
+# Veg Sahayyak SDK Model & Data Retention
+-keep class com.vegsahayyak.speedcore.data.location.SpeedData** { *; }
+-keep class com.vegsahayyak.speedcore.domain.TelematicsResult { *; }
+-keep class com.vegsahayyak.speedcore.units.SpeedUnit { *; }
+-keep class com.vegsahayyak.speedcore.api.DrivingProfile** { *; }
+-keep class com.vegsahayyak.speedui.api.VoiceAction** { *; }
+-keep interface com.vegsahayyak.speedcore.api.** { *; }
+```
+
+---
+
+## ⚡ 5. Verify Installation
+
+In your `MainActivity.kt`, verify that the SDK compiles and initializes:
+
+```kotlin
+import com.vegsahayyak.speedcore.api.SpeedAssistant
+import com.vegsahayyak.speedcore.api.DrivingProfile
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        
+        // Initialize the SDK and apply a driving profile (e.g., Highway)
+        val assistant = SpeedAssistant.with(this)
+        assistant.setDrivingProfile(DrivingProfile.CarHighway)
+        
+        android.util.Log.d("SpeedAssistant", "SDK initialized with Highway Profile!")
+    }
+}
+```
+
+👉 **Next Up:** Learn about the [SDK Architecture Overview](/architecture/) and how the signal processing algorithms work under the hood.
+
+
+--- END OF FILE: getting-started/index.md ---
+
+
+--- START OF FILE: guide/auto-start.md ---
+
+# 🚗 In-Vehicle Auto-Start (Activity Recognition)
+
+The `:speed-autostart` module provides zero-touch background trip detection using **Google Play Services Activity Recognition API**. It eliminates user friction by automatically starting speed tracking when the driver enters a vehicle and halting it upon exit to preserve battery.
+
+---
+
+## 🎯 Why Activity Recognition Over Background GPS?
+
+Continuous background GPS polling drains the device battery rapidly and triggers severe Google Play Store rejection risks under background location policies.
+
+By using **Activity Recognition (`DetectedActivity.IN_VEHICLE`)**:
+* **Hardware Co-Processor Power:** Runs on low-power sensor hubs without waking the main CPU.
+* **Zero Location Polling When Idle:** The GPS radio remains powered off until the vehicle begins moving.
+* **Automatic Teardown:** When the driver parks and walks away (`ACTIVITY_TRANSITION_EXIT`), the SDK shuts down the foreground service automatically.
+
+```mermaid
+graph LR
+    A[Phone Sensors / Accelerometer] --> B[Google Play Activity Recognition]
+    B -->|IN_VEHICLE ENTER| C[AutoStartReceiver]
+    C -->|start| D[Speedometer Foreground Service]
+    B -->|IN_VEHICLE EXIT| C
+    C -->|stop| E[Halt Service & Save Battery]
+```
+
+---
+
+## 📦 Gradle Dependency
+
+Add `:speed-autostart` to your `build.gradle.kts`:
+
+```kotlin
+dependencies {
+    implementation(platform("com.vegsahayyak:speed-bom:2.1.0"))
+    implementation("com.vegsahayyak:speed-core")
+    implementation("com.vegsahayyak:speed-autostart")
+}
+```
+
+---
+
+## 💻 Registering Auto-Start (`AutoStartManager`)
+
+Enable auto-start with runtime permission handling:
+
+```kotlin
+import com.vegsahayyak.speedautostart.AutoStartManager
+
+AutoStartManager.enable(
+    context = context,
+    onPermissionRequired = {
+        // Android 10+ (API 29+) requires Manifest.permission.ACTIVITY_RECOGNITION
+        ActivityCompat.requestPermissions(
+            activity,
+            arrayOf(android.Manifest.permission.ACTIVITY_RECOGNITION),
+            REQUEST_CODE_ACTIVITY_RECOGNITION
+        )
+    },
+    onSuccess = {
+        // Successfully registered with Google Play Services!
+        // SpeedAssistant will now auto-start when vehicle motion is detected.
+    },
+    onError = { exception ->
+        Log.e("Telematics", "Activity Recognition registration failed", exception)
+    }
+)
+```
+
+---
+
+## 📡 How the Receiver Operates (`AutoStartReceiver`)
+
+The SDK bundles `AutoStartReceiver` in its internal manifest. When Google Play Services fires an activity transition event:
+
+```kotlin
+// Automatically handled by :speed-autostart
+when (event.activityType) {
+    DetectedActivity.IN_VEHICLE -> {
+        when (event.transitionType) {
+            ActivityTransition.ACTIVITY_TRANSITION_ENTER -> {
+                SpeedAssistant.with(context).start()
+            }
+            ActivityTransition.ACTIVITY_TRANSITION_EXIT -> {
+                SpeedAssistant.with(context).stop()
+            }
+        }
+    }
+}
+```
+
+---
+
+## 🛡️ Android Manifest Requirements
+
+Ensure the activity recognition permission is declared in your `AndroidManifest.xml`:
+
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for Android 10+ (API 29+) -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+</manifest>
+```
+
+> [!TIP]
+> **Passenger Mode:** If a user is riding as a passenger (e.g. on a bus or train), your app can provide a "Passenger Mode" pause toggle that calls `SpeedAssistant.with(context).stop()`, overriding auto-start until the next journey.
+
+
+--- END OF FILE: guide/auto-start.md ---
+
+
+--- START OF FILE: guide/cicd-and-quality.md ---
+
+# Quality & Testing Resources
+
+Looking for testing guidelines or CI/CD documentation? This topic is split into dedicated sections depending on your role:
+
+---
+
+## 📱 For Client App Developers Integrating the SDK
+If you are integrating the SDK into your Android application and want to write unit tests, UI tests, or mock telematics streams:
+
+👉 **[Go to the Client Testing & QA Guide](/guide/testing)**
+* Unit testing ViewModels with `ISpeedRepository` & MockK
+* Simulating synthetic speeds with `FakeSpeedRepository`
+* Jetpack Compose & Espresso UI test recipes
+* Enterprise reliability & stability SLA guarantees
+
+---
+
+## 🛠️ For SDK Maintainers & Contributors
+If you are contributing to the SDK codebase, running linters, or publishing releases:
+
+👉 **[Go to CI/CD & Release Pipeline](/standards/05_CICD_AND_RELEASE_PIPELINE)**
+* GitHub Actions quality gate workflows
+* Running `ktlint`, `detekt`, and Android Lint
+* Internal test execution & JaCoCo coverage metrics
+* Automated Maven AAR publishing to GitHub Packages
+
+
+--- END OF FILE: guide/cicd-and-quality.md ---
+
+
+--- START OF FILE: guide/driving-profiles.md ---
+
+# 🚗 Driving Profiles & Speed Corridors
+
+The **Veg Sahayyak SDK** includes a legally compliant, globally localized **Driving Profiles** system (`DrivingProfile.kt`) designed to configure speed warning corridors in a single function call.
+
+---
+
+## 🎯 Why Driving Profiles?
+
+Traditional speed limit apps perform naive floating-point conversions (e.g. converting $120\text{ km/h}$ gives $74.5645\text{ mph}$), leading to awkward numbers on driver dashboards. 
+
+`DrivingProfile` provides **explicitly rounded, legally localized speed limits** for each vehicle type and speed unit ($120\text{ km/h}$ for Europe vs $75\text{ mph}$ for US interstate highways).
+
+```mermaid
+graph LR
+    A[Vehicle Type Selected] --> B{Active SpeedUnit}
+    B -->|km/h| C[Clean Metric Ceiling: 120 km/h]
+    B -->|mph| D[Clean Imperial Ceiling: 75 mph]
+    C --> E[TelematicsEngine Corridor]
+    D --> E
+```
+
+---
+
+## 📦 Applying a Driving Profile
+
+Apply any predefined profile to `SpeedAssistant`:
+
+```kotlin
+import com.vegsahayyak.speedcore.api.SpeedAssistant
+import com.vegsahayyak.speedcore.api.DrivingProfile
+
+// Apply standard Highway Profile with 1 line of code
+SpeedAssistant.with(context)
+    .setDrivingProfile(DrivingProfile.CarHighway)
+    .start()
+```
+
+---
+
+## 🏎️ Built-In Vehicle Profiles Matrix
+
+| Vehicle Category | Profile Object | Max Limit (`km/h`) | Min Limit (`km/h`) | Max Limit (`mph`) | Min Limit (`mph`) | Target Domain |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Passenger Cars** | `DrivingProfile.CarHighway` | **120** | **60** | **75** | **40** | Interstates, Motorways, Expressways |
+| **Passenger Cars** | `DrivingProfile.CarCity` | **50** | **0** | **30** | **0** | Urban and suburban commuting |
+| **Motorcycles** | `DrivingProfile.Motorcycle` | **120** | **0** | **75** | **0** | Unrestricted motorcycle riding |
+| **Logistics / Freight** | `DrivingProfile.TruckHighway` | **90** | **50** | **60** | **30** | EU/US governed Heavy Goods Vehicles (HGV) |
+| **Public Transit** | `DrivingProfile.BusCoach` | **100** | **50** | **65** | **30** | Intercity passenger buses |
+| **Agriculture / Heavy** | `DrivingProfile.TractorAgricultural` | **40** | **0** | **25** | **0** | Farm and construction machinery |
+| **Micro-Mobility** | `DrivingProfile.EScooter` | **20** | **0** | **12.5** | **0** | Shared e-scooters & micromobility |
+| **Micro-Mobility** | `DrivingProfile.Bicycle` | **25** | **0** | **15** | **0** | Pedelecs, e-bikes, and city bicycles |
+| **Pedestrian** | `DrivingProfile.Walking` | **8** | **0** | **5** | **0** | Jogging, fitness, walking pace |
+| **Special Zones** | `DrivingProfile.SchoolZone` | **30** | **0** | **20** | **0** | School zones and residential quiet zones |
+
+---
+
+## 🛠️ Dynamic Cloud Limits (`CustomProfile`)
+
+If your fleet application integrates with the **Google Roads API**, **HERE Maps**, or **OpenStreetMap** to ingest real-time geofenced legal speed limits, use `DrivingProfile.CustomProfile`:
+
+```kotlin
+import com.vegsahayyak.speedcore.api.DrivingProfile
+import com.vegsahayyak.speedcore.units.SpeedUnit
+
+// Dynamically received 65 mph limit from cloud GPS corridor
+val dynamicLimitFromMap = 65f
+val minimumCorridorLimit = 40f
+
+val roadProfile = DrivingProfile.CustomProfile(
+    maxLimit = dynamicLimitFromMap,
+    minLimit = minimumCorridorLimit,
+    unit = SpeedUnit.MILES_PER_HOUR
+)
+
+// Ingest into SpeedAssistant
+SpeedAssistant.with(context).setDrivingProfile(roadProfile)
+```
+
+The SDK automatically converts custom bounds to SI units ($m/s$) internally while maintaining display accuracy for any user-selected gauge unit.
+
+---
+
+## 🧪 Unit Testing Driving Profiles
+
+`DrivingProfile` is designed to be easily testable without requiring Android context or mock hardware:
+
+```kotlin
+@Test
+fun verifyHighwayLimitsMetricAndImperial() {
+    val highway = DrivingProfile.CarHighway
+    
+    // Metric validation
+    assertEquals(120f, highway.getMaxLimit(SpeedUnit.KILOMETERS_PER_HOUR))
+    assertEquals(60f, highway.getMinLimit(SpeedUnit.KILOMETERS_PER_HOUR))
+    
+    // Imperial validation
+    assertEquals(75f, highway.getMaxLimit(SpeedUnit.MILES_PER_HOUR))
+    assertEquals(40f, highway.getMinLimit(SpeedUnit.MILES_PER_HOUR))
+}
+```
+
+
+--- END OF FILE: guide/driving-profiles.md ---
+
+
+--- START OF FILE: guide/floating-overlay.md ---
+
+# 🪟 Floating Overlay (Picture-in-Picture) Widget
+
+The `:speed-overlay` module provides a lightweight, circular **Floating Speedometer Widget (`PipWidget`)** designed to hover above third-party navigation apps (such as Google Maps, Waze, or delivery driver apps) using Android's `SYSTEM_ALERT_WINDOW`.
+
+---
+
+## 🎯 Key Capabilities
+
+* **Floating Screen Overlay:** Stays pinned on top of any navigation or dispatch app.
+* **Dynamic Ring Warnings:** Animates border colors between **Safe (Green)**, **Over-Speed (Red)**, and **Under-Speed (Cyan)**.
+* **Translucent Glassmorphism:** Semi-transparent dark background (`0x66000000`) prevents obscuring navigation map turns.
+* **Decoupled Architecture:** Pure Jetpack Compose widget with zero Activity lifecycle dependencies.
+
+```mermaid
+graph TD
+    A[Speedometer Foreground Service] -->|Real-Time Velocity| B[PipWidget Compose View]
+    B -->|Overlay Window| C[Google Maps / Waze / Delivery App]
+    B -->|Exceeds Limit| D[Animated Red Alert Ring]
+```
+
+---
+
+## 📦 Gradle Dependency
+
+Add `:speed-overlay` to your `build.gradle.kts`:
+
+```kotlin
+dependencies {
+    implementation(platform("com.vegsahayyak:speed-bom:2.1.0"))
+    implementation("com.vegsahayyak:speed-core")
+    implementation("com.vegsahayyak:speed-overlay")
+}
+```
+
+---
+
+## 💻 Basic Usage (`PipWidget`)
+
+```kotlin
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import com.vegsahayyak.speedoverlay.PipWidget
+import com.vegsahayyak.speedoverlay.PipWidgetConfig
+
+@Composable
+fun FloatingSpeedometer(
+    currentSpeed: Float,
+    isOverLimit: Boolean,
+    isUnderLimit: Boolean = false
+) {
+    PipWidget(
+        speed = currentSpeed,
+        unitLabel = "km/h",
+        isOverLimit = isOverLimit,
+        isUnderLimit = isUnderLimit
+    )
+}
+```
+
+---
+
+## 🎨 Customizing Brand Colors (`PipWidgetConfig`)
+
+You can fully customize size, typography, and alert colors via `PipWidgetConfig`:
+
+```kotlin
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.vegsahayyak.speedoverlay.PipWidgetConfig
+
+val customFleetOverlayConfig = PipWidgetConfig(
+    size = 110.dp,
+    safeColor = Color(0xFF00E676),          // Neon Green
+    warningColor = Color(0xFFFF1744),       // Bright Crimson Red
+    underSpeedColor = Color(0xFF00E5FF),    // Electric Cyan
+    backgroundColor = Color(0x99000000),    // Dark Glass
+    speedTextSize = 40.sp,
+    unitTextSize = 13.sp,
+    textColor = Color.White
+)
+
+PipWidget(
+    speed = currentSpeed,
+    unitLabel = "mph",
+    isOverLimit = isOverLimit,
+    config = customFleetOverlayConfig
+)
+```
+
+---
+
+## 🛠️ Displaying via Android `WindowManager`
+
+To render `PipWidget` as a system overlay above other applications:
+
+### 1. Declare Permission in `AndroidManifest.xml`
+```xml
+<uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+```
+
+### 2. Request Permission at Runtime
+```kotlin
+if (!Settings.canDrawOverlays(context)) {
+    val intent = Intent(
+        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+        Uri.parse("package:${context.packageName}")
+    )
+    context.startActivity(intent)
+}
+```
+
+### 3. Attach Compose View to WindowManager
+```kotlin
+val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+val layoutParams = WindowManager.LayoutParams(
+    WindowManager.LayoutParams.WRAP_CONTENT,
+    WindowManager.LayoutParams.WRAP_CONTENT,
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+    else
+        WindowManager.LayoutParams.TYPE_PHONE,
+    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+    PixelFormat.TRANSLUCENT
+).apply {
+    gravity = Gravity.TOP or Gravity.START
+    x = 100
+    y = 200
+}
+
+val composeView = ComposeView(context).apply {
+    setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+    setContent {
+        PipWidget(
+            speed = currentSpeedKmh,
+            unitLabel = "km/h",
+            isOverLimit = currentSpeedKmh > 80f
+        )
+    }
+}
+
+windowManager.addView(composeView, layoutParams)
+```
+
+
+--- END OF FILE: guide/floating-overlay.md ---
+
+
+--- START OF FILE: guide/index.md ---
+
+# Core Integration Guide
+
+This guide details the complete developer workflow for initializing the **Veg Sahayyak SDK**, configuring speed thresholds, starting foreground tracking, and consuming the real-time telematics `StateFlow`.
+
+---
+
+## ⚡ 1. SDK Initialization
+
+Initialize the SDK by calling `SpeedAssistant.with(context)`. The SDK employs a lightweight manual service locator pattern internally, so you can call `with(context)` from any Android `Activity`, `Fragment`, or `Application` class without setting up Hilt or Dagger.
+
+```kotlin
+import com.vegsahayyak.speedcore.api.SpeedAssistant
+import com.vegsahayyak.speedcore.units.SpeedUnit
+
+class App : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        
+        // Initialize the SDK with a predefined or custom driving profile
+        SpeedAssistant.with(this)
+            .setDrivingProfile(DrivingProfile.CarHighway)
+    }
+}
+```
+
+> [!TIP]
+> **Dynamic Limits:** The `DrivingProfile` automatically handles maximum and minimum speed limits based on vehicle type and road legalities. You can also build a `DrivingProfile.CustomProfile` if you need manual limits.
+
+---
+
+## 🚗 2. Starting & Stopping Tracking
+
+### Starting the Background Service
+Calling `.start()` initiates the `SpeedometerService` foreground service and registers the Fused Location Provider client:
+
+```kotlin
+val assistant = SpeedAssistant.with(context)
+
+// Set the driving profile and launch background tracking
+assistant
+    .setDrivingProfile(DrivingProfile.CarHighway)
+    .start()
+```
+
+### Auto-Resuming on Boot / App Restart
+To restart tracking only if the driver previously had tracking enabled:
+
+```kotlin
+class App : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        
+        // Auto-starts service only if preference state is enabled
+        val wasRunning = SpeedAssistant.with(this).startIfEnabled()
+    }
+}
+```
+
+### Stopping Tracking
+To stop background tracking and release GPS hardware immediately:
+
+```kotlin
+SpeedAssistant.with(context).stop()
+```
+
+---
+
+## 📡 3. Observing Real-Time Telematics
+
+The SDK exposes a Kotlin Coroutines `StateFlow<SpeedData>`. You can collect this stream in Jetpack Compose or traditional ViewModels.
+
+### Sealed Interface: `SpeedData`
+
+The state stream emits instances of the `SpeedData` sealed interface:
+
+| Subtype | Description | Key Fields |
+| :--- | :--- | :--- |
+| `SpeedChanged` | Active valid speed reading | `speedMps: Float`, `isOverLimit: Boolean`, `isUnderLimit: Boolean`, `accuracyMeters: Float` |
+| `LowAccuracy` | GPS fix rejected by precision filter | `reason: String` |
+| `GPSDisabled` | Device location provider is turned off | N/A |
+| `SpeedUnavailable` | Tracking active, waiting for satellite fix | N/A |
+| `Disabled` | Tracking is stopped | N/A |
+
+### Jetpack Compose Example
+
+```kotlin
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.vegsahayyak.speedcore.api.SpeedAssistant
+import com.vegsahayyak.speedcore.data.location.SpeedData
+import com.vegsahayyak.speedui.components.SpeedGauge
+
+@Composable
+fun DriverDashboardScreen() {
+    // Collect SDK flow as Compose state
+    val speedState by SpeedAssistant.observeFlow().collectAsState(initial = SpeedData.SpeedUnavailable)
+
+    when (val state = speedState) {
+        is SpeedData.SpeedChanged -> {
+            SpeedGauge(
+                speed = state.speedMps * 3.6f, // Convert m/s to km/h
+                warningSpeed = 80f,           // Maximum speed limit
+                minSpeedLimit = 40f,          // Minimum highway corridor
+                isTrackingActive = true,
+                isOverLimit = state.isOverLimit,
+                gpsAccuracyMeters = state.accuracyMeters
+            )
+            
+            // Contextual alert banners based on dual corridor bounds
+            if (state.isOverLimit) {
+                Text("⚠️ Slow Down: Maximum speed limit exceeded (80 km/h)!")
+            } else if (state.isUnderLimit) {
+                Text("🐢 Speed Up: Maintain minimum expressway corridor speed (40 km/h)!")
+            }
+        }
+        is SpeedData.LowAccuracy -> {
+            Text("GPS Signal Weak (±${state.reason}) - Searching satellites...")
+        }
+        is SpeedData.GPSDisabled -> {
+            Text("Please enable device GPS in settings.")
+        }
+        is SpeedData.SpeedUnavailable,
+        is SpeedData.Disabled -> {
+            SpeedGauge(
+                speed = 0f,
+                warningSpeed = 80f,
+                minSpeedLimit = 40f,
+                isTrackingActive = false
+            )
+        }
+    }
+}
+```
+
+### ViewModel Example (Coroutines)
+
+```kotlin
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+
+class TelematicsViewModel : ViewModel() {
+    
+    val speedState = SpeedAssistant.observeFlow()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = SpeedData.SpeedUnavailable
+        )
+}
+```
+
+### Traditional XML & ViewBinding Integration
+
+If your application uses traditional Android XML layouts and ViewBinding (instead of full Jetpack Compose), the SDK supports both approaches:
+
+#### Approach A: Embedding `SpeedGauge` in XML with `ComposeView`
+
+You can embed the modern `SpeedGauge` component directly into any XML layout file using `ComposeView`:
+
+::: code-group
+
+```xml [res/layout/activity_driver_dashboard.xml]
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- Speedometer Gauge embedded inside XML -->
+    <androidx.compose.ui.platform.ComposeView
+        android:id="@+id/speedGaugeView"
+        android:layout_width="match_parent"
+        android:layout_height="220dp" />
+
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:gravity="center"
+        android:textSize="16sp" />
+
+    <Button
+        android:id="@+id/btnToggleTracking"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Start Tracking" />
+
+</LinearLayout>
+```
+
+```kotlin [DriverDashboardActivity.kt (ViewBinding)]
+import android.os.Bundle
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.vegsahayyak.speedcore.api.SpeedAssistant
+import com.vegsahayyak.speedcore.data.location.SpeedData
+import com.vegsahayyak.speedui.components.SpeedGauge
+import com.vegsahayyak.speedui.components.ThemeMode
+import com.example.app.databinding.ActivityDriverDashboardBinding
+import kotlinx.coroutines.launch
+
+class DriverDashboardActivity : AppCompatActivity() {
+
+    private lateinit var binding: ActivityDriverDashboardBinding
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityDriverDashboardBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        val assistant = SpeedAssistant.with(this)
+            .setDrivingProfile(DrivingProfile.CarHighway)
+
+        binding.btnToggleTracking.setOnClickListener {
+            assistant.start()
+        }
+
+        // Collect telematics Flow within lifecycleScope
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                SpeedAssistant.observeFlow().collect { state ->
+                    when (state) {
+                        is SpeedData.SpeedChanged -> {
+                            val speedKmh = state.speedMps * 3.6f
+                            binding.statusText.text = "Speed: ${speedKmh.toInt()} km/h"
+
+                            // Update embedded ComposeView
+                            binding.speedGaugeView.setContent {
+                                SpeedGauge(
+                                    speed = speedKmh,
+                                    warningSpeed = 80f,
+                                    minSpeedLimit = 40f,
+                                    isTrackingActive = true,
+                                    isOverLimit = state.isOverLimit,
+                                    themeMode = ThemeMode.DARK_GRAY
+                                )
+                            }
+                        }
+                        is SpeedData.LowAccuracy -> {
+                            binding.statusText.text = "GPS Signal Weak (±${state.reason})"
+                        }
+                        is SpeedData.GPSDisabled -> {
+                            binding.statusText.text = "GPS Disabled"
+                        }
+                        is SpeedData.SpeedUnavailable,
+                        is SpeedData.Disabled -> {
+                            binding.statusText.text = "Standby"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+:::
+
+#### Approach B: Pure Headless `:speed-core` (Zero Compose Dependencies)
+
+If your app does not include Jetpack Compose libraries, you can import only `speed-core` and bind directly to your existing Android Views:
+
+```kotlin
+lifecycleScope.launch {
+    repeatOnLifecycle(Lifecycle.State.STARTED) {
+        SpeedAssistant.observeFlow().collect { state ->
+            if (state is SpeedData.SpeedChanged) {
+                val speedKmh = (state.speedMps * 3.6f).toInt()
+                binding.speedTextView.text = "$speedKmh km/h"
+                binding.speedProgressBar.progress = speedKmh
+                binding.alertIndicator.visibility = if (state.isOverLimit) View.VISIBLE else View.GONE
+            }
+        }
+    }
+}
+```
+
+---
+
+## 🔔 4. Customizing Fullscreen Alarms
+
+When a driver exceeds the speed limit, `SpeedometerService` fires a high-priority alarm notification with full-screen intent capabilities. You can specify a custom `PendingIntent` to direct the driver to your app's custom warning screen:
+
+```kotlin
+val warningIntent = Intent(context, CustomAlertActivity::class.java).apply {
+    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+    putExtra("TRIGGERED_AT_SPEED", 95.5f)
+}
+
+val pendingIntent = PendingIntent.getActivity(
+    context,
+    0,
+    warningIntent,
+    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+)
+
+SpeedAssistant.with(context)
+    .setWarningPendingIntent(pendingIntent)
+    .start()
+```
+
+---
+
+## 🎨 5. Client Branding & Custom Color Schemes
+
+You can dynamically inject custom brand colors to style notifications and speedometer UI elements without subclassing or editing library resources:
+
+```kotlin
+import com.vegsahayyak.speedcore.api.SpeedColorScheme
+import com.vegsahayyak.speedui.components.SpeedUiColorScheme
+import androidx.compose.ui.graphics.Color
+
+// 1. Configure Core notification colors
+val brandColors = SpeedColorScheme(
+    safeColor = 0xFF00E676.toInt(),
+    warningApproachColor = 0xFFFF9100.toInt(),
+    overSpeedColor = 0xFFFF1744.toInt(),
+    underSpeedColor = 0xFF00E5FF.toInt(),
+    primaryAccentColor = 0xFF6200EE.toInt()
+)
+
+SpeedAssistant.with(context)
+    .setColorScheme(brandColors)
+    .start()
+
+// 2. Pass matching Compose colors to UI components
+val composeBrandColors = SpeedUiColorScheme(
+    safeColor = Color(0xFF00E676),
+    warningApproachColor = Color(0xFFFF9100),
+    overSpeedColor = Color(0xFFFF1744),
+    underSpeedColor = Color(0xFF00E5FF),
+    primaryAccentColor = Color(0xFF6200EE)
+)
+
+SpeedGauge(
+    speed = currentSpeedKmh,
+    warningSpeed = 80f,
+    isTrackingActive = true,
+    colorScheme = composeBrandColors
+)
+```
+
+## 🎯 6. Advanced Features: PIP, Voice, Autostart, & HUD
+
+The SDK provides powerful drop-in components to supercharge your telematics app.
+
+### A. PIP Widget (Floating Overlay)
+The `speed-overlay` module allows your app to display a floating circular speedometer over third-party navigation apps like Google Maps.
+
+```kotlin
+import com.vegsahayyak.speedoverlay.PipWidget
+
+// Inside your Compose screen
+PipWidget(
+    speed = currentSpeedKmh,
+    unitLabel = "km/h",
+    isOverLimit = state.isOverLimit
+)
+```
+
+### B. Voice Commands
+Integrate hands-free operation using the `speed-ui` module. The `VoiceCommandButton` automatically handles audio recording permissions and offline parsing.
+
+```kotlin
+import com.vegsahayyak.speedui.components.VoiceCommandButton
+
+VoiceCommandButton(
+    onCommandParsed = { action ->
+        when (action) {
+            is VoiceAction.SetProfile -> assistant.setDrivingProfile(action.profile)
+            is VoiceAction.StopTracking -> assistant.stop()
+        }
+    }
+)
+```
+
+### C. Zero-Touch Autostart
+Use the `speed-autostart` module to completely bypass manual start/stop interactions. This utilizes the Google Play Services hardware sensor hub for extreme battery efficiency.
+
+```kotlin
+import com.vegsahayyak.speedautostart.AutoStartManager
+
+// Enable activity recognition trip detection
+AutoStartManager.enable(context, onSuccess = {
+    Log.d("SpeedSDK", "Autostart configured successfully!")
+})
+```
+
+### D. HUD Mode (Windshield Projection)
+For night driving, the `speed-ui` module includes a specialized `HudDisplay` component that mirrors the UI for reflection on a car windshield.
+
+```kotlin
+import com.vegsahayyak.speedui.components.HudDisplay
+
+// Automatically flips the UI horizontally for mirror reflection
+HudDisplay(
+    speed = currentSpeedKmh,
+    isOverLimit = state.isOverLimit
+)
+```
+
+---
+
+## 📚 Specialized Feature Guides
+
+Explore in-depth documentation for v2.1.0 modules and features:
+
+| Feature Guide | Module | Description |
+| :--- | :--- | :--- |
+| [🚗 **Driving Profiles & Corridors**](/guide/driving-profiles) | `:speed-core` | Pre-configured legal limits (Highway, City, Trucks, Agriculture, Scooters, Bikes, Walking, School zones) and dynamic `CustomProfile`. |
+| [🎙️ **Voice Commands & AI NLU**](/guide/voice-commands) | `:speed-ui` | Hands-free operation with `VoiceCommandButton`, offline regex, and Google Gemini / LLM NLU parser injection. |
+| [🪟 **Floating PiP Overlay**](/guide/floating-overlay) | `:speed-overlay` | Picture-in-Picture circular speedometer widget hovering over Google Maps and Waze using `SYSTEM_ALERT_WINDOW`. |
+| [🚗 **In-Vehicle Auto-Start**](/guide/auto-start) | `:speed-autostart` | Zero-touch journey tracking with Google Play Activity Recognition (`IN_VEHICLE`) and battery-saving auto-stop. |
+| [⚙️ **Telematics & Signal Processing**](/guide/signal-processing) | `:speed-core` | Discrete EMA ($\alpha = 0.3$) smoothing, GPS confidence filters ($25\text{m}$), Dual Schmitt Trigger Hysteresis, and non-standard vehicle usage. |
+| [🔋 **Permissions & Battery Optimization**](/guide/permissions-and-battery) | Cross-Module | Android 10-15 background location, battery optimization exemptions, and OEM killer workarounds. |
+| [🧪 **Testing & QA Guide**](/guide/testing) | Cross-Module | Comprehensive testing workflows with `FakeSpeedRepository`, MockK, Turbine, and Compose UI tests. |
+
+
+
+--- END OF FILE: guide/index.md ---
+
+
+--- START OF FILE: guide/permissions-and-battery.md ---
+
+# Permissions & Battery Optimization
+
+Building an enterprise Android telematics application requires handling modern Android background execution constraints, Doze mode restrictions, and strict location permission models introduced in Android 10, 11, 12, 13, and 14+.
+
+---
+
+## 🔒 1. Android Permission Flow
+
+To track speed accurately, client applications must request runtime permissions according to the user's Android OS version.
+
+<PermissionFlowDiagram />
+
+### Required Permissions by Android Version
+
+| Android Version | Permission | Why It's Needed |
+| :--- | :--- | :--- |
+| **All Versions** | `android.permission.ACCESS_FINE_LOCATION` | Required to query GPS satellite velocity fixes with sub-meter accuracy. |
+| **Android 10+ (API 29)** | `android.permission.ACCESS_BACKGROUND_LOCATION` | Allows location querying when the app is completely in the background without UI focus. |
+| **Android 10+ (API 29)** | `android.permission.ACTIVITY_RECOGNITION` | *(Optional)* Required by `:speed-autostart` to detect `IN_VEHICLE` transitions. |
+| **All Versions** | `android.permission.SYSTEM_ALERT_WINDOW` | *(Optional)* Required by `:speed-overlay` to draw the floating PiP widget over other apps. |
+| **Android 13+ (API 33)** | `android.permission.POST_NOTIFICATIONS` | Required to display persistent foreground service notifications with speed icons. |
+| **Android 14+ (API 34)** | `android.permission.FOREGROUND_SERVICE_LOCATION` | Required to declare the specific foreground service type in Google Play Store reviews. |
+
+---
+
+## 📱 2. Implementing the Request Flow
+
+### Requesting Foreground Permissions in Jetpack Compose
+
+```kotlin
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+
+@Composable
+fun RequestTelematicsPermissions(onGranted: () -> Unit) {
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineLocation = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val postNotif = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            permissions[android.Manifest.permission.POST_NOTIFICATIONS] == true
+        } else true
+
+        if (fineLocation && postNotif) {
+            onGranted()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val permissions = mutableListOf(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            permissions.add(android.Manifest.permission.ACTIVITY_RECOGNITION)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            permissions.add(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+        permissionLauncher.launch(permissions.toTypedArray())
+    }
+}
+```
+
+---
+
+## ⚡ 3. Battery Optimization & Doze Mode
+
+When an Android device enters **Doze Mode** (stationary with screen turned off), the operating system throttles network and CPU wakelocks. For delivery and long-haul fleet drivers, telematics must continue uninterrupted.
+
+### Requesting Battery Optimization Exemption
+
+To ensure continuous background GPS collection on long shifts, request exemption from battery optimizations:
+
+```kotlin
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
+
+fun requestIgnoreBatteryOptimizations(context: Context) {
+    val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    val packageName = context.packageName
+
+    if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        context.startActivity(intent)
+    }
+}
+```
+
+---
+
+## 🛑 4. OEM Aggressive Background Killers
+
+Certain Android device manufacturers (notably **Samsung One UI**, **Xiaomi MIUI/HyperOS**, **Huawei**, and **Oppo ColorOS**) implement aggressive background task killers that can kill persistent services despite active notifications.
+
+### Recommendations for Enterprise Fleet Deployments
+
+1. **AutoStartManager (Recommended Workaround)**: By using the `:speed-autostart` module, you can bypass aggressive OEM killers entirely. The `IN_VEHICLE` activity transition leverages the low-power Google Play Services sensor hub, which OEMs typically exempt from termination. This avoids the need for constant background CPU wakeups.
+2. **Deep Sleeping Apps (Samsung)**: Ensure your fleet application is added to the "Never sleeping apps" whitelist.
+3. **Screen Off Throttling**: Use the SDK's built-in `updateWhileScreenOff` setting:
+   ```kotlin
+   // In SpeedAssistant configuration:
+   SpeedAssistant.with(context).preferences.setUpdateWhileScreenOff(true)
+   ```
+
+---
+
+## 🛡️ 5. Privacy & Zero-PII Compliance
+
+The Veg Sahayyak SDK is engineered with a **Privacy-First** architecture:
+
+* **Zero Lat/Lon Telemetry Storage**: The SDK computes velocity vectors locally on device and immediately discards raw latitude and longitude coordinates.
+* **No Third-Party Analytics Tracking**: `speed-core` contains zero telemetry trackers, Firebase dependencies, or ad networks.
+* **GDPR & CCPA Compliant**: Since no personally identifiable information (PII) is transmitted, integration meets strict enterprise compliance guidelines.
+
+
+--- END OF FILE: guide/permissions-and-battery.md ---
+
+
+--- START OF FILE: guide/signal-processing.md ---
+
+# ⚙️ Telematics Engine & Signal Processing
+
+The core telematics pipeline in `:speed-core` (`TelematicsEngine.kt`) processes raw GPS fixes through mathematical smoothing and state-machine hysteresis to eliminate false alarms and jitter.
+
+---
+
+## 🔬 Mathematical Signal Pipeline
+
+Raw GPS sensor hardware suffers from multipath reflections, satellite geometry variance, and momentary signal noise. The `TelematicsEngine` filters raw velocity through three sequential mathematical gates:
+
+```mermaid
+graph TD
+    A[Raw GPS Fix: Speed & Accuracy] --> B{Accuracy Filter ≤ 25m?}
+    B -->|No - Discard Fix| C[Emit LowAccuracy State]
+    B -->|Yes - Accept Fix| D[Exponential Moving Average α = 0.3]
+    D --> E[Smoothed Velocity Output]
+    E --> F{Dual Schmitt Trigger Hysteresis}
+    F -->|Speed ≥ Limit + 1.0 km/h| G[Trigger Over-Speed Alert]
+    F -->|Speed ≤ Limit - 3.0 km/h| H[Dismiss Over-Speed Alert]
+    F -->|Within Corridor| I[Maintain Safe State]
+```
+
+---
+
+## 1. GPS Confidence & Accuracy Gating
+
+Before any velocity reading is processed, `TelematicsEngine` validates the horizontal accuracy estimate ($2\sigma$ precision in meters):
+
+$$\text{accuracyMeters} \le 25.0\text{ m}$$
+
+If the device reports poor satellite geometry (e.g. inside tunnels or urban canyons where accuracy exceeds $25\text{ m}$), the fix is discarded and the SDK emits `SpeedData.LowAccuracy`. This prevents inaccurate velocity spikes from sounding alarms.
+
+---
+
+## 2. Exponential Moving Average (EMA) Smoothing
+
+To eliminate erratic velocity jitter from raw GPS sensor readings, the engine applies discrete first-order Exponential Moving Average (EMA) smoothing:
+
+$$v_{\text{smoothed}}[t] = \alpha \cdot v_{\text{raw}}[t] + (1 - \alpha) \cdot v_{\text{smoothed}}[t-1]$$
+
+Where:
+* **$\alpha = 0.3$** (Alpha coefficient chosen for optimal balance between needle responsiveness and jitter suppression).
+* $v_{\text{raw}}[t]$ is the instantaneous velocity from `Location.getSpeed()`.
+* $v_{\text{smoothed}}[t-1]$ is the prior smoothed velocity state.
+
+---
+
+## 3. Dual Schmitt Trigger Hysteresis
+
+To prevent "fluttering" alarms (where an alarm rapidly toggles on and off when driving right at the limit boundary), the SDK implements asymmetric Schmitt Trigger Hysteresis:
+
+$$\text{Alert Trigger Threshold} = v_{\text{limit}} + 1.0\text{ km/h} \quad (+0.278\text{ m/s})$$
+
+$$\text{Alert Dismissal Threshold} = v_{\text{limit}} - 3.0\text{ km/h} \quad (-0.833\text{ m/s})$$
+
+* **Activation:** The over-speed alarm only sounds when smoothed speed crosses $+1.0\text{ km/h}$ above the legal limit.
+* **Dismissal:** Once active, the driver must decelerate $-3.0\text{ km/h}$ below the limit before the alarm turns off.
+
+### Minimum Speed (Under-Speed) Stationary Suppression
+To prevent annoying false under-speed alarms when navigating stoplights, traffic, or speed breakers, the SDK employs **Stationary Suppression**. 
+If the vehicle's speed drops below $8.0\text{ km/h}$, the under-speed alarm is aggressively suppressed. It will only fire if the vehicle is actively driving ($> 8.0\text{ km/h}$) but failing to maintain the legal minimum threshold.
+
+---
+
+## 🚀 Non-Standard Vehicle & Advanced Applications
+
+Because `TelematicsEngine` is pure Kotlin and decoupled from Android UI, it can be applied to non-automotive telematics domains:
+
+### 1. Consumer Drones (UAVs)
+* **Use Case:** Regulations cap drone speeds (e.g., $100\text{ mph}$ in the US).
+* **Application:** Drone ground control apps running on Android can pipe UAV telemetry directly into `TelematicsEngine` using `SpeedUnit.MILES_PER_HOUR` or `SpeedUnit.METERS_PER_SECOND` to warn pilots if wind currents push the drone past legal airspeed.
+
+### 2. Maritime & Marine (Boats & Jet Skis)
+* **Use Case:** Enforcing "No-Wake Zones" ($< 5\text{ mph}$) near harbors and marinas.
+* **Application:** Marine chartplotters or boat dashboard tablets ingest GPS velocity using `SpeedUnit.MILES_PER_HOUR` or `SpeedUnit.KILOMETERS_PER_HOUR` for auditory No-Wake compliance alarms.
+
+### 3. Light Aviation & Gliders
+* **Use Case:** Low-altitude gliders and ultralights monitoring maximum airspeed limits and minimum stall speeds.
+* **Application:** Flight tracking tablets pipe velocity vectors into `TelematicsEngine` using `SpeedUnit.METERS_PER_SECOND` or `SpeedUnit.FEET_PER_SECOND` to provide visual corridor guidance.
+
+
+--- END OF FILE: guide/signal-processing.md ---
+
+
+--- START OF FILE: guide/testing.md ---
+
+# Testing Your App & Quality Assurance
+
+Learn how to write unit, UI, and automated CI/CD tests for your Android application when integrating the **Veg Sahayyak SDK**, simulate synthetic telematics streams, and verify our enterprise reliability guarantees.
+
+---
+
+## 🧪 1. Unit Testing Client ViewModels
+
+The SDK provides the interface **`ISpeedRepository`** (`com.vegsahayyak.speedcore.api.ISpeedRepository`) to enable clean dependency injection and mocking in your test suites.
+
+### Testing with MockK & Turbine
+
+When testing a `ViewModel` that consumes `ISpeedRepository.observeSpeed()`, use `kotlinx-coroutines-test` and [Turbine](https://github.com/cashapp/turbine) to verify flow emissions:
+
+```kotlin
+// DriverDashboardViewModel.kt
+package com.example.fleetapp.ui
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.vegsahayyak.speedcore.api.ISpeedRepository
+import com.vegsahayyak.speedcore.data.location.SpeedData
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+
+data class DriverUiState(
+    val currentSpeedKmh: Float = 0f,
+    val isOverSpeedAlert: Boolean = false,
+    val isUnderSpeedAlert: Boolean = false,
+    val isTracking: Boolean = false
+)
+
+class DriverDashboardViewModel(
+    private val speedRepository: ISpeedRepository
+) : ViewModel() {
+
+    val uiState: StateFlow<DriverUiState> = speedRepository.observeSpeed()
+        .map { data ->
+            when (data) {
+                is SpeedData.SpeedChanged -> DriverUiState(
+                    currentSpeedKmh = data.speedMps * 3.6f,
+                    isOverSpeedAlert = data.isOverLimit,
+                    isUnderSpeedAlert = data.isUnderLimit,
+                    isTracking = true
+                )
+                is SpeedData.LowAccuracy -> DriverUiState(isTracking = true)
+                is SpeedData.SpeedUnavailable,
+                is SpeedData.GPSDisabled,
+                is SpeedData.Disabled -> DriverUiState(isTracking = false)
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DriverUiState())
+}
+```
+
+```kotlin
+// DriverDashboardViewModelTest.kt
+package com.example.fleetapp.ui
+
+import app.cash.turbine.test
+import com.vegsahayyak.speedcore.api.ISpeedRepository
+import com.vegsahayyak.speedcore.data.location.SpeedData
+import io.mockk.every
+import io.mockk.mockk
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+class DriverDashboardViewModelTest {
+
+    private val speedRepository: ISpeedRepository = mockk()
+    private val speedFlow = MutableStateFlow<SpeedData>(SpeedData.SpeedUnavailable)
+    private lateinit var viewModel: DriverDashboardViewModel
+
+    @Before
+    fun setup() {
+        every { speedRepository.observeSpeed() } returns speedFlow
+        every { speedRepository.isEnable() } returns true
+        viewModel = DriverDashboardViewModel(speedRepository)
+    }
+
+    @Test
+    fun `when vehicle exceeds limit, uiState reflects over-speed alert`() = runTest {
+        viewModel.uiState.test {
+            // Initial state
+            assertEquals(0f, awaitItem().currentSpeedKmh, 0.01f)
+
+            // Emit over-speed reading (24.44 m/s ≈ 88.0 km/h > 80 km/h limit)
+            speedFlow.value = SpeedData.SpeedChanged(
+                speedMps = 24.44f,
+                isOverLimit = true,
+                isUnderLimit = false,
+                accuracyMeters = 3.2f
+            )
+
+            val state = awaitItem()
+            assertEquals(88.0f, state.currentSpeedKmh, 0.1f)
+            assertTrue("Over-speed alert must be active", state.isOverSpeedAlert)
+        }
+    }
+}
+```
+
+---
+
+## 🛰️ 2. Synthetic Telematics Fixture (`FakeSpeedRepository`)
+
+For automated UI tests or local emulator QA, use a **`FakeSpeedRepository`**. It eliminates emulator flakiness, runs instantaneously, and emits deterministic telematics events without GPS hardware:
+
+```kotlin
+// Test Fixture: FakeSpeedRepository.kt
+package com.example.fleetapp.testing
+
+import com.vegsahayyak.speedcore.api.ISpeedRepository
+import com.vegsahayyak.speedcore.data.location.SpeedData
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+class FakeSpeedRepository : ISpeedRepository {
+
+    private val _speedFlow = MutableStateFlow<SpeedData>(SpeedData.SpeedUnavailable)
+    private var isTrackingEnabled = true
+
+    override fun observeSpeed(): Flow<SpeedData> = _speedFlow.asStateFlow()
+
+    override fun isEnable(): Boolean = isTrackingEnabled
+    override fun isLocationAvailable(): Boolean = _speedFlow.value !is SpeedData.GPSDisabled
+
+    override fun toggle(boolean: Boolean) { isTrackingEnabled = boolean }
+    override fun enable() { isTrackingEnabled = true }
+    override fun disable() { isTrackingEnabled = false }
+
+    /** Emit a simulated speed in km/h */
+    fun emitSpeed(
+        speedKmh: Float,
+        accuracyMeters: Float = 3.0f,
+        isOverLimit: Boolean = false,
+        isUnderLimit: Boolean = false
+    ) {
+        _speedFlow.value = SpeedData.SpeedChanged(
+            speedMps = speedKmh / 3.6f,
+            isOverLimit = isOverLimit,
+            isUnderLimit = isUnderLimit,
+            accuracyMeters = accuracyMeters
+        )
+    }
+
+    /** Simulate entering an active GPS dead-zone / tunnel */
+    fun emitGpsLost() {
+        _speedFlow.value = SpeedData.SpeedUnavailable
+    }
+
+    /** Simulate user disabling device location services */
+    fun emitGpsDisabled() {
+        _speedFlow.value = SpeedData.GPSDisabled
+    }
+
+    /** Simulate low accuracy signal jitter */
+    fun emitLowAccuracy(reason: String = "GPS Accuracy: 35.0 m/s") {
+        _speedFlow.value = SpeedData.LowAccuracy(reason)
+    }
+}
+```
+
+---
+
+## 🎨 3. Jetpack Compose UI Testing
+
+Test the Compose UI `SpeedGauge` and `VoiceCommandButton` components with the `createComposeRule()` test runner:
+
+```kotlin
+// SpeedUiComposeTest.kt
+package com.example.fleetapp.ui
+
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.vegsahayyak.speedui.components.SpeedGauge
+import com.vegsahayyak.speedui.components.VoiceCommandButton
+import com.vegsahayyak.speedcore.api.DrivingProfile
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class SpeedUiComposeTest {
+
+    @get:Rule
+    val composeTestRule = createComposeRule()
+
+    @Test
+    fun speedGaugeRendersSpeedAndAlertState() {
+        composeTestRule.setContent {
+            SpeedGauge(
+                speed = 95f,
+                warningSpeed = 80f,
+                isTrackingActive = true,
+                isOverLimit = true,
+                unitLabel = "km/h"
+            )
+        }
+
+        // Verify gauge renders updated numeric value and label
+        composeTestRule.onNodeWithText("95").assertIsDisplayed()
+        composeTestRule.onNodeWithText("km/h").assertIsDisplayed()
+    }
+    
+    @Test
+    fun voiceCommandButtonRenders() {
+        composeTestRule.setContent {
+            VoiceCommandButton(
+                onCommandParsed = {}
+            )
+        }
+        
+        // Verify Voice Command button exists in hierarchy
+        composeTestRule.onNodeWithContentDescription("Voice Command").assertIsDisplayed()
+    }
+}
+```
+
+---
+
+## 💉 4. SDK Dependency Injection via `SpeedAssistant.useRepository()`
+
+The `SpeedAssistant` SDK provides built-in repository substitution via **`useRepository()`**, allowing you to inject test doubles directly:
+
+### Direct Substitution in Integration Tests
+
+```kotlin
+val fakeRepo = FakeSpeedRepository()
+
+// Inject fake repository directly into SDK instance
+val assistant = SpeedAssistant.with(context)
+    .useRepository(fakeRepo)
+    .setDrivingProfile(DrivingProfile.CarHighway)
+
+assistant.start()
+
+// Simulate a speed event
+fakeRepo.emitSpeed(speedKmh = 85f, isOverLimit = true)
+```
+
+### Hilt Test Module (`@TestInstallIn`)
+
+If your app uses Hilt for dependency injection:
+
+```kotlin
+// FakeSpeedRepositoryModule.kt
+@Module
+@TestInstallIn(
+    components = [SingletonComponent::class],
+    replaces = [SpeedAssistantModule::class]
+)
+object FakeSpeedRepositoryModule {
+
+    @Provides
+    @Singleton
+    fun provideFakeSpeedRepository(): FakeSpeedRepository = FakeSpeedRepository()
+
+    @Provides
+    @Singleton
+    fun provideSpeedRepository(fake: FakeSpeedRepository): ISpeedRepository = fake
+}
+```
+
+---
+
+## 📍 5. End-to-End GPS Mocking via `FusedLocationProviderClient`
+
+For automated hardware-pipeline testing on physical devices or emulators, Google Play Services provides official mock location APIs via **`setMockMode`** and **`setMockLocation`**:
+
+```kotlin
+// MockLocationHelper.kt
+package com.example.fleetapp.testing
+
+import android.annotation.SuppressLint
+import android.location.Location
+import android.location.LocationManager
+import android.os.SystemClock
+import com.google.android.gms.location.FusedLocationProviderClient
+
+class MockLocationHelper(private val fusedClient: FusedLocationProviderClient) {
+
+    /** Enable mock mode (requires android.permission.ACCESS_MOCK_LOCATION in debug manifest) */
+    @SuppressLint("MissingPermission")
+    fun enableMockMode(enabled: Boolean) {
+        fusedClient.setMockMode(enabled)
+    }
+
+    /** Inject a simulated GPS fix with explicit velocity & accuracy */
+    @SuppressLint("MissingPermission")
+    fun injectLocation(speedMps: Float, accuracyMeters: Float = 3.0f) {
+        val mockLocation = Location(LocationManager.GPS_PROVIDER).apply {
+            latitude = 12.9716
+            longitude = 77.5946
+            altitude = 920.0
+            speed = speedMps
+            accuracy = accuracyMeters
+            time = System.currentTimeMillis()
+            elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+        }
+        fusedClient.setMockLocation(mockLocation)
+    }
+}
+```
+
+> [!NOTE]
+> `setMockMode()` requires the `ACCESS_MOCK_LOCATION` permission in your `src/debug/AndroidManifest.xml` and "Select mock location app" enabled in Android Developer Options on test devices.
+
+---
+
+## 📱 6. Robolectric Headless Service Testing
+
+If you are verifying SDK initialization and preferences in JVM unit tests without an emulator, configure **Robolectric**:
+
+```kotlin
+// SpeedAssistantServiceTest.kt
+package com.example.fleetapp.service
+
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import com.vegsahayyak.speedcore.api.SpeedAssistant
+import com.vegsahayyak.speedcore.api.DrivingProfile
+import com.vegsahayyak.speedui.components.VoiceCommandParser
+import com.vegsahayyak.speedui.api.VoiceAction
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+class SpeedAssistantServiceTest {
+
+    private lateinit var context: Context
+
+    @Before
+    fun setup() {
+        context = ApplicationProvider.getApplicationContext()
+    }
+
+    @Test
+    fun `with() initializes dependencies without throwing exceptions`() {
+        val assistant = SpeedAssistant.with(context)
+            .setDrivingProfile(DrivingProfile.CarHighway)
+
+        assertNotNull(assistant.tracker)
+        assertNotNull(assistant.preferences)
+    }
+
+    @Test
+    fun `VoiceCommandParser parses profile correctly`() {
+        val action = VoiceCommandParser.parse("set mode to highway")
+        assertEquals(VoiceAction.SetProfile(DrivingProfile.CarHighway), action)
+    }
+}
+```
+
+---
+
+## 🚀 7. Automated CI/CD Test Execution Commands
+
+In continuous integration pipelines (GitHub Actions, GitLab CI, Bitrise), execute test suites with Gradle:
+
+| Test Scope | Gradle Command | Description |
+| :--- | :--- | :--- |
+| **Unit & ViewModel Tests** | `./gradlew testDebugUnitTest` | Fast headless tests running on host JVM (MockK, Robolectric, Turbine). |
+| **Instrumentation & Compose UI** | `./gradlew connectedDebugAndroidTest` | Runs automated UI tests on connected physical devices or CI emulators. |
+| **Lint & Deprecation Scan** | `./gradlew lintDebug` | Validates Android API contracts, permissions, and layout integrity. |
+
+---
+
+## 🛡️ 8. Enterprise Quality & Reliability Guarantees
+
+The Veg Sahayyak SDK is built and verified against strict enterprise SLAs to ensure zero regressions in high-volume production apps:
+
+| Quality Metric | SLA Guarantee | Verification Method |
+| :--- | :--- | :--- |
+| **Mathematical Domain Coverage** | **100% Branch Coverage** | All EMA smoothing & Schmitt hysteresis formulas are tested against synthetic GPS jitter datasets. |
+| **Overall Line Coverage** | **94% Coverage** | Enforced via automated JaCoCo gates on every pull request. |
+| **Memory & CPU Leak Audit** | **0 Memory Leaks** | Continuous LeakCanary and Android Profiler checks during 24-hour endurance simulations. |
+| **ProGuard / R8 Obfuscation** | **Consumer Rules Shipped** | Public models (`SpeedData`, `ISpeedRepository`, `SpeedUnit`) are preserved; internal reflection is eliminated. |
+| **Android Version Support** | **API 23 &ndash; 37** | Verified across all Android OS versions and modern Foreground Service permission regimes. |
+
+---
+
+## 🔒 9. ProGuard & R8 Configuration
+
+The SDK bundles its own **`consumer-rules.pro`** inside `speed-core.aar` and `speed-ui.aar`. You do not need to add custom keep rules in your app's `proguard-rules.pro`:
+
+```properties
+# Bundled automatically in speed-core.aar
+-keep class com.vegsahayyak.speedcore.data.location.SpeedData** { *; }
+-keep class com.vegsahayyak.speedcore.domain.TelematicsResult { *; }
+-keep class com.vegsahayyak.speedcore.units.SpeedUnit { *; }
+-keep class com.vegsahayyak.speedcore.api.DrivingProfile** { *; }
+-keep class com.vegsahayyak.speedui.api.VoiceAction** { *; }
+-keep interface com.vegsahayyak.speedcore.api.** { *; }
+```
+
+---
+
+👉 **Looking for internal SDK contribution guidelines?** See our [CI/CD & Release Pipeline](/standards/05_CICD_AND_RELEASE_PIPELINE) in Operations & Standards.
+
+
+--- END OF FILE: guide/testing.md ---
+
+
+--- START OF FILE: guide/voice-commands.md ---
+
+# 🎙️ Hands-Free Voice Commands & AI NLU
+
+The `:speed-ui` module provides a drop-in **Voice Command System** enabling commercial drivers, couriers, and motorists to adjust speed thresholds hands-free without looking away from the road.
+
+---
+
+## 🎯 Architectural Overview
+
+The Voice Command pipeline is divided into two distinct responsibilities:
+1. **Speech-to-Text Layer (`VoiceCommandButton`)**: Listens to microphone audio via Android's native `SpeechRecognizer` Activity Contract and transcribes voice into text.
+2. **Intent Parsing Layer (`VoiceCommandParser`)**: Translates raw text strings into structured `VoiceAction` domain events (offline Regex or remote LLM).
+
+```mermaid
+graph TD
+    A[Driver Spoken Audio] --> B[VoiceCommandButton Composable]
+    B -->|Transcribed Text| C{VoiceCommandParser}
+    C -->|Offline Regex| D[RegexVoiceCommandParser]
+    C -->|Cloud LLM| E[GeminiVoiceParser]
+    D --> F[VoiceAction.SetMaxLimit / SetMinLimit / ChangeUnit]
+    E --> F
+    F --> G[SpeedAssistant.with context .setWarningSpeedThreshold]
+```
+
+---
+
+## 📦 Basic Usage (`VoiceCommandButton`)
+
+Drop the `VoiceCommandButton` into your Compose dashboard:
+
+```kotlin
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import com.vegsahayyak.speedui.components.VoiceCommandButton
+import com.vegsahayyak.speedui.api.VoiceAction
+import com.vegsahayyak.speedcore.api.SpeedAssistant
+
+@Composable
+fun DriverDashboard() {
+    VoiceCommandButton(
+        onActionParsed = { action ->
+            when (action) {
+                is VoiceAction.SetMaxLimit -> {
+                    // Spoken: "Set limit to 80"
+                    SpeedAssistant.with(context).setWarningSpeedThreshold(action.limit)
+                }
+                is VoiceAction.SetMinLimit -> {
+                    // Spoken: "Set minimum speed to 40"
+                    SpeedAssistant.with(context).setMinWarningSpeedThreshold(action.limit)
+                }
+                is VoiceAction.ChangeUnit -> {
+                    // Spoken: "Change unit to miles per hour"
+                    println("Switching unit to ${action.unitName}")
+                }
+                is VoiceAction.Unknown -> {
+                    println("Voice command not recognized")
+                }
+            }
+        }
+    )
+}
+```
+
+---
+
+## 🌐 Multilingual Regex Parsing (`RegexVoiceCommandParser`)
+
+By default, the SDK uses `RegexVoiceCommandParser` which operates **100% offline with zero network latency**. You can configure custom regex patterns to support non-English international markets:
+
+```kotlin
+import com.vegsahayyak.speedui.utils.RegexVoiceCommandParser
+
+val multilingualParser = RegexVoiceCommandParser()
+
+// In your Compose hierarchy:
+VoiceCommandButton(
+    parser = multilingualParser,
+    onActionParsed = { action -> /* handle action */ }
+)
+```
+
+### Supported Default Commands (English)
+* *"Set max speed to 80"* $\rightarrow$ `VoiceAction.SetMaxLimit(80f)`
+* *"Speed limit 100"* $\rightarrow$ `VoiceAction.SetMaxLimit(100f)`
+* *"Set minimum speed to 40"* $\rightarrow$ `VoiceAction.SetMinLimit(40f)`
+* *"Switch to miles per hour"* $\rightarrow$ `VoiceAction.ChangeUnit("MILES_PER_HOUR")`
+* *"Change unit to kilometers"* $\rightarrow$ `VoiceAction.ChangeUnit("KILOMETERS_PER_HOUR")`
+
+---
+
+## 🤖 Advanced AI / Google Gemini NLU Integration
+
+For enterprise fleets requiring natural language understanding (e.g. interpreting *"Hey assistant, please cap my speed at seventy-five miles an hour"* or handling regional dialects), implement the `VoiceCommandParser` interface and connect to Google Gemini:
+
+```kotlin
+import com.vegsahayyak.speedui.api.VoiceCommandParser
+import com.vegsahayyak.speedui.api.VoiceAction
+import com.google.ai.client.generativeai.GenerativeModel
+
+class GeminiVoiceCommandParser(
+    private val generativeModel: GenerativeModel
+) : VoiceCommandParser {
+
+    override suspend fun parse(text: String): VoiceAction? {
+        val prompt = """
+            You are an in-vehicle telematics assistant. The driver said: "$text".
+            Extract their intent into JSON:
+            - If setting max limit: {"action": "SET_MAX", "limit": 80}
+            - If setting min limit: {"action": "SET_MIN", "limit": 40}
+            - If changing unit: {"action": "CHANGE_UNIT", "unit": "km/h"}
+            Return only raw JSON.
+        """.trimIndent()
+
+        val response = generativeModel.generateContent(prompt)
+        val rawJson = response.text ?: return VoiceAction.Unknown
+
+        return parseJsonResponse(rawJson)
+    }
+
+    private fun parseJsonResponse(json: String): VoiceAction {
+        // Parse JSON into VoiceAction instances
+        return VoiceAction.SetMaxLimit(80f)
+    }
+}
+```
+
+Inject your custom AI parser into `VoiceCommandButton`:
+
+```kotlin
+VoiceCommandButton(
+    parser = GeminiVoiceCommandParser(myGeminiModel),
+    onActionParsed = { action -> /* handle action */ }
+)
+```
+
+---
+
+## 🛡️ Required Android Permissions
+
+The `VoiceCommandButton` automatically handles launching the Android speech intent. Ensure `RECORD_AUDIO` is declared in your app's `AndroidManifest.xml`:
+
+```xml
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+```
+
+
+--- END OF FILE: guide/voice-commands.md ---
+
+
+--- START OF FILE: index.md ---
+
+---
+layout: home
+
+hero:
+  name: "Veg Sahayyak SDK"
+  text: "The Telematics Engine for Modern Android Apps."
+  tagline: "Drop-in background GPS, EMA smoothing, and OLED-ready UI in 3 lines of code."
+  image:
+    src: /logo.svg
+    alt: Veg Sahayyak SDK Logo
+  actions:
+    - theme: brand
+      text: Read the Docs →
+      link: /getting-started/
+    - theme: alt
+      text: Explore Architecture →
+      link: /architecture/
+
+features:
+  - icon: 🛰️
+    title: Headless Background Telematics
+    details: High-accuracy Fused Location tracking that survives app backgrounding and system Doze mode with zero UI coupling.
+  - icon: 📈
+    title: Dual Speed Limits & Schmitt Hysteresis
+    details: Maximum speed ceiling and minimum corridor monitoring with EMA jitter filtering (alpha=0.3) and +1/-3 km/h flutter prevention.
+  - icon: 🎨
+    title: OLED-Ready Jetpack Compose UI & HUD Mode
+    details: Pre-built fluid 60fps SpeedGauge and night-time windshield reflection HUDDisplay with dynamic SpeedColorScheme customization.
+  - icon: 🌙
+    title: Windshield Projection HUD Mode
+    details: Dedicated OLED pure black (#000000) dashboard with vertical/horizontal reflection transformations via Modifier.hudMirror().
+  - icon: 🔋
+    title: Intelligent Battery Management
+    details: Automatic GPS throttling during screen-off cycles, saving up to 68% battery on 8+ hour driving shifts.
+  - icon: 🛡️
+    title: Enterprise DI-Agnostic Core
+    details: Pure Kotlin Coroutines & StateFlow architecture with modular plugins (:speed-overlay, :speed-autostart).
+  - icon: 📦
+    title: Bill of Materials (BOM)
+    details: Guaranteed semantic version alignment (v2.1.0) across all SDK plugins and modules.
+---
+
+<div class="interactive-card">
+  <BadgesBar />
+
+  ## ⚡ Live Telematics Engine Simulator
+
+  Test the real-time speed calculation, Schmitt Trigger hysteresis alerts, and Compose UI rendering directly in your browser:
+
+  <InteractiveSpeedGauge :initialSpeed="45" :initialLimit="80" initialUnit="km/h" />
+</div>
+
+<div class="showcase-banner" style="background: linear-gradient(135deg, rgba(56, 189, 248, 0.08) 0%, rgba(59, 130, 246, 0.04) 100%); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 16px; padding: 20px; margin: 28px 0; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px;">
+  <div style="display: flex; align-items: center; gap: 16px;">
+    <img src="/app-logo.png" alt="Veg Sahayyak Logo" style="width: 54px; height: 54px; border-radius: 12px; box-shadow: 0 4px 14px rgba(217, 70, 239, 0.35); border: 1px solid rgba(217, 70, 239, 0.4); flex-shrink: 0; background: #000;" />
+    <div>
+      <span style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">Production Reference</span>
+      <h3 style="margin: 6px 0 4px 0; color: #f8fafc; font-size: 1.25rem;">Battle-Tested in the Speed Assistant App</h3>
+      <p style="margin: 0; color: #94a3b8; font-size: 0.9rem; max-width: 540px;">
+        Explore how our flagship consumer application uses the SDK for real-time HUD telematics with &lt; 5 MB memory overhead and fluid 60fps Jetpack Compose rendering.
+      </p>
+    </div>
+  </div>
+  <div style="display: flex; gap: 10px;">
+    <a href="/showcase/" style="background: #38bdf8; color: #0f172a; font-weight: 600; font-size: 14px; padding: 8px 16px; border-radius: 6px; text-decoration: none;">View Showcase →</a>
+    <a href="https://speed-assistant-a00f6.web.app/" target="_blank" rel="noopener noreferrer" style="background: rgba(255,255,255,0.06); color: #e2e8f0; font-weight: 500; font-size: 14px; padding: 8px 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12); text-decoration: none;">Live App Site ↗</a>
+  </div>
+</div>
+
+## 🏢 Tailored for Enterprise Mobile Fleets
+
+<div class="grid-solutions" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin: 24px 0;">
+
+  <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 20px;">
+    <h3 style="margin-top: 0; color: #38bdf8;">🚚 Logistics & Long-Haul Fleets</h3>
+    <p style="font-size: 14px; color: #94a3b8;">Prevent highway hypnosis, track driver adherence to highway corridors, and reduce speeding violations across thousands of commercial vehicle routes.</p>
+  </div>
+
+  <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 20px;">
+    <h3 style="margin-top: 0; color: #4ade80;">🛵 Last-Mile Delivery Apps</h3>
+    <p style="font-size: 14px; color: #94a3b8;">Protect two-wheeler and e-bike couriers with real-time audio and haptic speed alerts without interrupting navigation turn-by-turn prompts.</p>
+  </div>
+
+  <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 20px;">
+    <h3 style="margin-top: 0; color: #fbbf24;">👨‍👩‍👧 Family Safety & Parental Monitors</h3>
+    <p style="font-size: 14px; color: #94a3b8;">Battery-friendly background monitoring for teen drivers. Immediate foreground notification alerts when customized speed ceilings are broken.</p>
+  </div>
+
+  <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 20px;">
+    <h3 style="margin-top: 0; color: #c084fc;">📊 Usage-Based Insurance (UBI)</h3>
+    <p style="font-size: 14px; color: #94a3b8;">Collect high-confidence, noise-filtered speed streams to generate accurate driver risk scores and actuarial safety profiles.</p>
+  </div>
+
+</div>
+
+## 🚀 Quick Integration in 3 Steps
+
+::: code-group
+
+```kotlin [1. Add Repository (settings.gradle.kts)]
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        
+        // Authenticate with GitHub Packages
+        maven {
+            name = "VegSahayyakSDK"
+            url = uri("https://maven.pkg.github.com/VegSahayyak/veg-sahayyak-sdk")
+            credentials {
+                username = "YOUR_GITHUB_USERNAME"
+                password = "YOUR_READ_ONLY_PAT"
+            }
+        }
+    }
+}
+```
+
+```kotlin [2. Add Dependencies (app/build.gradle.kts)]
+dependencies {
+    // 1. Bill of Materials for version alignment
+    implementation(platform("com.vegsahayyak:speed-bom:2.1.0"))
+    
+    // 2. Headless tracking & alarm logic
+    implementation("com.vegsahayyak:speed-core")
+    
+    // 3. Optional Jetpack Compose Speedometer & HUD UI
+    implementation("com.vegsahayyak:speed-ui")
+
+    // 4. Optional PiP floating overlay & Activity Recognition plugins
+    implementation("com.vegsahayyak:speed-overlay")
+    implementation("com.vegsahayyak:speed-autostart")
+}
+```
+
+```kotlin [3. Initialize & Start (MainActivity.kt)]
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        
+        // 1. Configure and launch headless tracking
+        val assistant = SpeedAssistant.with(this)
+            .setWarningSpeedThreshold(80f) // Alert threshold in km/h
+            .setMinWarningSpeedThreshold(40f) // Minimum corridor threshold
+
+        assistant.start()
+
+        // 2. Render Jetpack Compose UI
+        setContent {
+            val speedState by SpeedAssistant.observeFlow().collectAsState(initial = SpeedData.SpeedUnavailable)
+            val currentSpeedKmh = (speedState as? SpeedData.SpeedChanged)?.let { it.speedMps * 3.6f } ?: 0f
+            val isOverLimit = (speedState as? SpeedData.SpeedChanged)?.isOverLimit ?: false
+            
+            SpeedGauge(
+                speed = currentSpeedKmh,
+                warningSpeed = 80f,
+                isTrackingActive = true,
+                isOverLimit = isOverLimit,
+                unitLabel = "km/h"
+            )
+        }
+    }
+}
+```
+
+:::
+
+
+--- END OF FILE: index.md ---
+
+
+--- START OF FILE: showcase/index.md ---
+
+---
+title: "Production Showcase: Speed Assistant App"
+description: "How the Veg Sahayyak Android consumer app uses Veg Sahayyak SDK for real-time telematics, jitter-free GPS speed tracking, and Jetpack Compose UI."
+---
+
+# 📱 Production Showcase: Speed Assistant App
+
+> **The Flagship Consumer Telematics Reference Implementation Powered by Veg Sahayyak SDK.**
+
+<div class="showcase-banner" style="background: linear-gradient(135deg, rgba(56, 189, 248, 0.08) 0%, rgba(59, 130, 246, 0.04) 100%); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 16px; padding: 24px; margin: 24px 0;">
+  <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 20px;">
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <img src="/app-logo.png" alt="Speed Assistant App Logo" style="width: 68px; height: 68px; border-radius: 16px; box-shadow: 0 4px 16px rgba(217, 70, 239, 0.35); border: 1px solid rgba(217, 70, 239, 0.4); flex-shrink: 0; background: #000;" />
+      <div>
+        <h2 style="margin: 0 0 6px 0; color: #38bdf8; font-size: 1.5rem; border: none; padding: 0;">Speed Assistant App</h2>
+        <p style="margin: 0; color: #94a3b8; font-size: 0.95rem; max-width: 580px; line-height: 1.5;">
+          A high-precision mobile speedometer and driving safety HUD application designed for daily commuters, highway drivers, and fleet operators.
+        </p>
+      </div>
+    </div>
+    <div>
+      <a href="https://speed-assistant-a00f6.web.app/" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; background: #38bdf8; color: #0f172a; font-weight: 600; padding: 11px 22px; border-radius: 8px; text-decoration: none; font-size: 0.95rem; box-shadow: 0 2px 8px rgba(56, 189, 248, 0.25);">
+        Visit App Website ↗
+      </a>
+    </div>
+  </div>
+</div>
+
+---
+
+## 🌟 Overview & Reference Role
+
+The **Speed Assistant App** serves as the primary **production reference implementation** of the `Veg Sahayyak SDK` (`com.vegsahayyak:speed-core` and `com.vegsahayyak:speed-ui`).
+
+Instead of maintaining a separate in-house telematics pipeline, the Speed Assistant consumer app delegates all GPS velocity calculation, signal noise filtering, threshold monitoring, and speedometer gauge rendering directly to the SDK.
+
+```mermaid
+flowchart LR
+    subgraph "Speed Assistant Consumer App"
+        UI[App Navigation & Settings]
+        Audio[Audio / Haptic Engine]
+    end
+
+    subgraph "Veg Sahayyak SDK"
+        Core["com.vegsahayyak:speed-core\n(EMA Filter + Schmitt Trigger + Fused Location)"]
+        ComposeUI["com.vegsahayyak:speed-ui\n(@Composable SpeedGauge)"]
+    end
+
+    subgraph "Android OS Hardware"
+        GPS[(Fused Location Provider)]
+        Screen[(Hardware Canvas / GPU)]
+    end
+
+    GPS --> Core
+    Core --> UI
+    Core --> Audio
+    Core --> ComposeUI
+    ComposeUI --> Screen
+```
+
+---
+
+## ⚡ Technical Benchmarks in Production
+
+| Dimension | Engineering Guarantee | SDK Implementation |
+| :--- | :--- | :--- |
+| **Memory Footprint** | **`< 5 MB` runtime heap** | Headless core engine with zero memory leaks and minimal object allocations in the critical location loop. |
+| **UI Render Performance** | **Fluid `60 FPS`** | Hardware-accelerated Canvas rendering via `@Composable SpeedGauge`. |
+| **GPS Velocity Smoothing** | **Real-time `α = 0.3` EMA** | Eliminates raw sensor jitter without introducing perceptible lag. |
+| **Threshold Stability** | **Dual Schmitt Hysteresis** | `+1.0 km/h` upper trigger / `-3.0 km/h` reset threshold eliminates alarm flutter. |
+| **Lifecycle Compliance** | **Android 10 to 15+ Safe** | Native `FOREGROUND_SERVICE_LOCATION` handling with zero unneeded wake-locks when stationary. |
+
+---
+
+## 🛠️ How the Production App Implements the SDK
+
+The reference application integrates the SDK using standard Kotlin Coroutines and Jetpack Compose state collection:
+
+### 1. Initialization in Application / Activity
+```kotlin
+// Initialize and configure headless telematics
+val speedAssistant = SpeedAssistant.with(context)
+    .setWarningSpeedThreshold(80f)      // Alert threshold in km/h
+    .setMinWarningSpeedThreshold(30f)   // Minimum corridor threshold
+    .setColorScheme(
+        SpeedColorScheme(
+            safeColor = 0xFF00E676.toInt(),
+            overSpeedColor = 0xFFFF1744.toInt(),
+            underSpeedColor = 0xFF00E5FF.toInt()
+        )
+    )
+
+// Start headless foreground service
+speedAssistant.start()
+```
+
+### 2. Rendering the HUD Gauge in Jetpack Compose
+```kotlin
+@Composable
+fun DriverDashboardScreen() {
+    val speedState by SpeedAssistant.observeFlow()
+        .collectAsState(initial = SpeedData.SpeedUnavailable)
+
+    val currentSpeedKmh = (speedState as? SpeedData.SpeedChanged)?.let { 
+        it.speedMps * 3.6f 
+    } ?: 0f
+
+    val isOverLimit = (speedState as? SpeedData.SpeedChanged)?.isOverLimit ?: false
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        SpeedGauge(
+            speed = currentSpeedKmh,
+            warningSpeed = 80f,
+            minSpeedLimit = 30f,
+            isTrackingActive = true,
+            isOverLimit = isOverLimit,
+            unitLabel = "km/h",
+            themeMode = ThemeMode.OLED_BLACK
+        )
+    }
+}
+```
+
+---
+
+## 🔗 Live Application Links
+
+To see the user interface, design, and feature set in action:
+
+* 🌐 **Official Web Landing Page:** [https://speed-assistant-a00f6.web.app/](https://speed-assistant-a00f6.web.app/)
+* 📦 **SDK Integration Guide:** [Getting Started with Veg Sahayyak SDK](/getting-started/)
+* 📐 **Architecture Deep Dive:** [Signal Smoothing & Schmitt Trigger Architecture](/architecture/)
+
+
+--- END OF FILE: showcase/index.md ---
+
+
+--- START OF FILE: standards/01_ARCHITECTURE_AND_CODE_STANDARDS.md ---
+
+# Architecture & Code Standards
+
+These guidelines define the structural rules and engineering standards for the **Veg Sahayyak SDK** codebase. AI agents and developers must adhere to these standards to maintain a clean, testable, and scalable modular architecture.
+
+---
+
+## 1. Modular Architecture Boundaries
+
+The repository is organized into distinct Gradle modules with strict boundaries:
+
+- **`:speed-core` (Headless Telematics Engine)**
+  - **Responsibility:** Mathematical signal processing (`TelematicsEngine`), Fused Location polling (`SpeedWatcher`), `SpeedColorScheme`, and foreground service lifecycle (`SpeedometerService`).
+  - **Rules:** **CRITICAL:** Jetpack Compose dependencies (e.g., `androidx.compose.ui`) must **never** leak into `:speed-core`. Minimal third-party footprint (only Google Play Services Location and Coroutines). Does not force DI frameworks on consuming clients.
+- **`:speed-ui` (Jetpack Compose Visual Layer)**
+  - **Responsibility:** Hardware-accelerated canvas speedometer (`SpeedGauge`), HUD digital display (`HudDisplay`), windshield reflection modifiers (`Modifier.hudMirror`), accessibility semantics, and automotive themes (`SpeedUiColorScheme`).
+  - **Rules:** Depends on `:speed-core` and Jetpack Compose. No direct Android framework storage or location polling.
+- **`:speed-overlay` (Floating PiP Overlay Widget)**
+  - **Responsibility:** Lightweight floating Picture-in-Picture window (`PipWidget`) for persistent speed display over third-party navigation apps.
+  - **Rules:** Optional plugin module. Decoupled from core logic.
+- **`:speed-autostart` (Zero-Touch Autostart Plugin)**
+  - **Responsibility:** Background trip detection (`AutoStartManager`) via Google Play Activity Recognition (`IN_VEHICLE` transitions).
+  - **Rules:** Optional plugin module. Zero runtime overhead for clients not needing automatic drive detection.
+- **`:speed-bom` (Bill of Materials)**
+  - **Responsibility:** Gradle platform artifact enforcing version alignment across SDK modules.
+- **`:app` (Sample / Demo Application)**
+  - **Responsibility:** End-to-end integration demo showing `SpeedAssistant` usage in real-world Activity, Compose, and Hilt environments.
+
+---
+
+## 2. Dependency Injection Strategy
+
+- **SDK Modules (`:speed-core`, `:speed-ui`)**:
+  - Employs a lightweight internal service locator (`SpeedCoreInternal`) to avoid imposing heavy DI frameworks on consuming clients.
+  - Public interfaces (`ISpeedRepository`, `IPreferenceRepository`) can be overridden at runtime via `SpeedAssistant.useRepository()` or `SpeedAssistant.usePreferenceRepository()`.
+- **Sample App (`:app`)**:
+  - Hilt is used for sample app dependency injection.
+  - Test modules use `@TestInstallIn` to bind test doubles (e.g. `FakeSpeedRepository`).
+
+---
+
+## 3. UI Framework: Jetpack Compose
+
+- **New Features:** All new UI must be written in **Jetpack Compose**.
+- **Canvas Rendering:** Automotive gauges must use hardware-accelerated Compose Canvas drawing with precomputed trigonometric lookup tables and tokens.
+- **State Hoisting:** UIs should be stateless. Hoist state to callers using `StateFlow<SpeedData>`.
+- **Naming:** Composable functions must be PascalCase and annotated with `@Composable` (e.g., `SpeedGauge`, `GaugeNeedle`).
+
+---
+
+## 4. State Management & Concurrency
+
+- Use **Kotlin Coroutines** and **Flows**.
+- Expose state streams using `Flow<SpeedData>` or `StateFlow`.
+- Thread boundary rules:
+  - Location event handling and mathematical filtering run on `Dispatchers.Default`.
+  - Service lifecycle and notification updates run on `Dispatchers.Main.immediate`.
+
+---
+
+## 5. Coding Conventions
+
+- **Language:** Kotlin only (Kotlin 1.9+ / 2.0+).
+- **Formatting:** Adhere to standard ktlint and detekt guidelines.
+- **Null Safety:** Avoid `!!` (not-null assertions). Use safe calls (`?.`) or Elvis operators (`?:`).
+- **Data Classes:** Use `data class` for immutable state models (`SpeedData.SpeedChanged`, `TelematicsResult`).
+- **Early-Exits (Guard Clauses):** Return early in validation logic instead of deeply nesting code inside `if` statements.
+- **DRY & KISS:** Extract repeated mathematical conversions into `SpeedUnit` and domain extensions.
+- **Meaningful KDoc:** Document mathematical constants (e.g., alpha EMA factor, Schmitt trigger delta values) and unit expectations on all public APIs.
+
+
+--- END OF FILE: standards/01_ARCHITECTURE_AND_CODE_STANDARDS.md ---
+
+
+--- START OF FILE: standards/02_FEATURE_DEVELOPMENT_WORKFLOW.md ---
+
+# Feature Development Workflow
+
+This document outlines the standard operating procedure for adding new features to the project. AI agents must follow this pipeline sequentially.
+
+## 1. Requirement & Planning Phase
+- **Understand the Goal:** Cross-reference requests against the strategic roadmap (`research/Expected_features_speed_Assist_Product_Roadmap.md`). If a feature violates the core pivot (e.g., adding a heavy map module), flag it.
+- **Create an Implementation Plan:** For any non-trivial change, AI must output an `implementation_plan.md` detailing:
+  - Which layers (`data`, `domain`, `presentation`) will change.
+  - What new classes or tests will be created.
+- **Wait for Approval:** Do not write code until the user approves the plan.
+
+## 2. Execution Phase (AI & Developer Workflow)
+When executing a new feature, strict adherence to the following sequence is mandatory. **Do not make any assumptions, fail out loud, and ask for clarity.**
+
+1. **Information Gathering:** Clarify requirements and gather any necessary mockups or existing references.
+2. **Analysis:** Analyze the codebase to find where the feature fits cleanly without breaking existing logic.
+3. **Preview (Diff Style):** Propose the exact code changes to the user using a `diff` style format. Clearly state the class names and functions being modified or created.
+4. **Approval & Execution:** **Stop and wait.** Do not apply corrections or write the code until explicit approval is given by the user. Once approved, apply the exact changes.
+5. **Post-Correction Review:** After applying the feature, show the resulting code changes using a `diff` style summary to confirm the exact modifications made.
+6. **Module Separation (SDK Architecture):** Write logic in the appropriate module (`:speed-core`, `:speed-ui`, `:speed-overlay`, `:speed-autostart`, `:speed-bom`). Keep `:speed-core` headless with zero Compose dependencies.
+
+## 3. Testing Phase (Mandatory)
+Every new feature or bug fix MUST be accompanied by unit and/or UI tests.
+- **Unit Tests:** Use **JUnit4 / Robolectric**, **MockK**, and **kotlinx-coroutines-test**. 
+  - Domain telematics algorithms (`TelematicsEngine`, `SpeedWatcher`, `SpeedUnit`) and repository implementations must have high branch and line coverage (target > 90%).
+  - **Verification:** Run `./gradlew testDebugUnitTest` locally to ensure all test suites pass before committing.
+- **UI Tests:** Use **Compose Testing rules** (`createComposeRule`) to verify that UI elements render correctly based on specific `SpeedData` and `UiState` inputs.
+- **CI/CD Quality Gates:** All commits and Pull Requests are automatically validated by GitHub Actions (`.github/workflows/quality-gates.yml`).
+
+## 4. Verification & Documentation
+- **Run Quality Gates:** Before concluding any task or pushing code, run the strict static analysis gates:
+  - Run `./gradlew detekt lintDebug`
+  - Fix any code smells or formatting issues reported by these tools.
+- **Run the Build:** Always verify that the project compiles via `./gradlew assembleDebug`.
+- **Update Docs:** If you added or modified public APIs, update the web documentation in `docs/` and verify the build with `npm run docs:build --prefix docs`.
+- **Walkthrough:** Generate a `walkthrough.md` summarizing what was built, how it was tested, and how to verify the feature.
+
+
+--- END OF FILE: standards/02_FEATURE_DEVELOPMENT_WORKFLOW.md ---
+
+
+--- START OF FILE: standards/03_MAINTENANCE_AND_BUG_FIXING.md ---
+
+# Maintenance & Bug Fixing
+
+Guidelines for triaging, debugging, and resolving production issues (Bugs, ANRs, Regressions) safely.
+
+## 1. Bug Fixing Protocol (AI & Developer Workflow)
+When implementing a fix or addressing an issue, strict adherence to the following sequence is mandatory. **Do not make any assumptions, fail out loud, and ask for clarity.**
+
+1. **Information Gathering:** Completely gather all necessary data before touching code. Ask the user for crash logs, system traces, or screenshots if they are required. The user can provide system traces for code if needed.
+2. **Analysis:** Analyze the codebase deeply and identify the accurate, root-cause fix.
+3. **Preview (Diff Style):** Propose the change to the user using a `diff` style format (or via an `implementation_plan.md` artifact). Clearly state the class name and function being modified.
+4. **Approval & Execution:** Do not apply corrections until explicit approval is given by the user. Once approved, apply the exact changes.
+5. **Post-Correction Review:** After applying the fix, show the resulting code changes using a `diff` style summary to confirm the exact modifications made.
+6. **Verification:** Ask the user to check the fix on a physical device. Only mark the task as completed after on-device verification is successful.
+
+## 2. Triage & Investigation
+- **Trace the Source:** When presented with a stack trace (e.g., from Firebase Crashlytics), isolate the specific layer. Is it a UI crash? A background service exception? A location permission denial?
+- **Avoid Guesswork:** Do not blindly wrap code in `try/catch`. Find the root cause (e.g., `NullPointerException` because GPS returned null before lock-on).
+
+## 2. Fixing Application Not Responding (ANRs)
+ANRs occur when the Main (UI) thread is blocked for > 5 seconds.
+- **Rule:** Never perform I/O, database reads (Room/DataStore), or heavy computation (like filtering GPS arrays) on the Main thread.
+- **Fix:** Move heavy work to `Dispatchers.IO` or `Dispatchers.Default` using Coroutines.
+  ```kotlin
+  withContext(Dispatchers.Default) {
+      // heavy GPS math
+  }
+  ```
+
+## 3. The Regression Testing Rule
+Before fixing any reported bug, **you must write a failing test** that reproduces the bug.
+1. Write a Unit Test that mimics the conditions of the crash. It should fail.
+2. Implement the fix in the codebase.
+3. Run the test again. It should pass.
+This ensures the bug is caught in CI/CD and never returns.
+
+## 4. Safe Refactoring
+When modernizing legacy code (e.g., migrating an old XML Activity to Compose or refactoring the `SpeedometerService`):
+- **Isolate:** Extract the business logic from the Android component into a decoupled class first.
+- **Test:** Write tests for the decoupled logic.
+- **Replace:** Swap the old implementation for the new one. Ensure zero functional changes from the user's perspective unless explicitly requested.
+
+
+--- END OF FILE: standards/03_MAINTENANCE_AND_BUG_FIXING.md ---
+
+
+--- START OF FILE: standards/04_NON_FUNCTIONAL_REQUIREMENTS.md ---
+
+# Non-Functional Requirements (NFRs)
+
+Because Speed Assist is a continuous-tracking app targeting safety and potentially fleets, Non-Functional Requirements are just as critical as the features themselves.
+
+## 1. Battery & Resource Optimization
+Continuous GPS polling is the #1 reason users uninstall driving apps.
+- **Adaptive Polling:** Do not request high-accuracy 1-second GPS updates if the user is stationary for > 5 minutes. Downscale the request interval dynamically.
+- **Wakelocks:** Use `ForegroundService` properly with clear notifications rather than raw CPU Wakelocks whenever possible. Release resources in `onDestroy()` or `onStop()`.
+- **Auto-Start Efficiency:** Leverage `:speed-autostart` (Google Play Services `IN_VEHICLE` transition) for zero-friction background trip detection instead of continuous CPU wakelocks, saving massive battery power while waiting for trips to start.
+
+## 2. Location & Privacy Compliance (Crucial)
+- **Permissions:** Always handle permission degradation gracefully. If `ACCESS_BACKGROUND_LOCATION` is denied but foreground is granted, the app should still function while open.
+- **Dialogs:** Adhere strictly to Google Play policies by showing explicit "Prominent Disclosure" rationale dialogs *before* requesting background location. (See `dialogs.showLocationPermissionRationale`).
+
+## 3. Performance & Stability
+- **Compose Recomposition:** Avoid passing unstable data classes or heavily mutating lists directly to Compose functions. Use `remember` and `key` blocks. Monitor for "jank" caused by excessive recomposition in HUD modes.
+- **GPS Jitter (EMA & Schmitt Trigger):** Raw GPS data is noisy at low speeds. The app implements Exponential Moving Average (EMA $\alpha = 0.3$) smoothing and Dual Schmitt Trigger Hysteresis ($+1.0\text{ km/h} / -3.0\text{ km/h}$) to eliminate velocity jitter and prevent alarm fluttering at boundary limits.
+
+## 4. Background Resiliency
+- **OS Kill Prevention:** Android (Doze mode) aggressively kills background apps. Always utilize a highly optimized `ForegroundService` with a persistent, non-dismissible notification to prevent the OS from silently killing the app during a drive.
+
+## 5. Safety & Distraction Optimization (Legal NFR)
+- **Voice & Audio First:** The UI must not distract the driver. Once driving begins, the screen should require zero interaction. Rely on audio escalation and high-contrast, glanceable UIs (HUD mode).
+- **Drive Mode Lockout:** Consider disabling complex UI interactions or typing while the vehicle is in motion to comply with hands-free and distraction laws.
+- **HUD Mode:** The `HudDisplay` component enforces distraction safety by utilizing a high-contrast, pure OLED black (`#000000`) background intended strictly for windshield reflection during night driving, eliminating peripheral glare.
+
+## 6. Hardware Heterogeneity Handling
+- **Calibration Offset:** Different phones have varying GPS chip qualities, and car speedometers are intentionally calibrated to show faster speeds than reality. Allow users to manually adjust the app's speed calculation by a percentage offset to match their dashboard perfectly.
+
+## 7. App Size & Offline Capability
+- **Zero Cloud Reliance:** The core speed tracking and alerting must function 100% offline without an internet connection. Do not rely on cloud processing for real-time safety critical alerts.
+- **Lightweight Footprint:** Total download size and runtime memory footprint must both remain $< 5\text{ MB}$.
+
+## 8. SDK Modular Architecture (B2B Ecosystem)
+Per the research failure analysis, the consumer app market is tough, and B2B SDK licensing is the future.
+- **Core Independence:** The location tracking and speed calculation logic (`TelematicsEngine`, `SpeedWatcher`, `ISpeedRepository`) in `:speed-core` is completely decoupled with zero UI or ad dependencies.
+- **Modular Mindset:** Features are isolated across `:speed-core`, `:speed-ui`, `:speed-overlay`, `:speed-autostart`, and `:speed-bom` with minimal public API surface.
+
+## 9. App Startup & Launch Weight
+- **Lightweight Initialization:** The app must open instantly. Do not initialize heavy SDKs, database migrations, or complex location requests synchronously on the main thread during `Application.onCreate()` or `Activity.onCreate()`. Defer non-essential initializations until after the first frame has rendered.
+
+
+--- END OF FILE: standards/04_NON_FUNCTIONAL_REQUIREMENTS.md ---
+
+
+--- START OF FILE: standards/05_CICD_AND_RELEASE_PIPELINE.md ---
+
+# CI/CD, Code Quality & Release Pipeline
+
+This document defines the automated quality gates, linting rules, test execution, and Maven publishing workflows for the **Veg Sahayyak SDK** codebase.
+
+<BadgesBar />
+
+---
+
+## 🏗️ Continuous Integration Workflow
+
+Every Pull Request and commit pushed to the `main` branch undergoes automated validation defined in `.github/workflows/quality-gates.yml`.
+
+```mermaid
+graph LR
+    PR[Git Push / PR] --> LINT[Static Analysis<br/>Detekt & Android Lint]
+    PR --> UNIT[Unit Tests & JUnit<br/>Robolectric & JUnit4]
+    PR --> BUILD[AAR/BOM Build<br/>Release Variants]
+    
+    LINT --> GATE{Quality Gate Pass?}
+    UNIT --> GATE
+    BUILD --> GATE
+    
+    GATE -->|Success| RELEASE[GitHub Packages Maven Publish]
+    GATE -->|Failure| BLOCK[Block Merge]
+```
+
+---
+
+## 🔍 1. Static Analysis & Linters
+
+The SDK enforces strict Kotlin coding standards, complexity limits, and architectural boundaries:
+
+| Tool | Role | Command |
+| :--- | :--- | :--- |
+| **`detekt`** | Identifies complexity smells, potential memory leaks, and architectural deviations. | `./gradlew detekt --stacktrace --info` |
+| **`Android Lint`** | Scans for Android API deprecations, resource leaks, and manifest security flaws. | `./gradlew lintDebug --stacktrace --info` |
+
+To run all static analysis checks locally before opening a pull request:
+
+```bash
+./gradlew detekt lintDebug
+```
+
+---
+
+## 🧪 2. Internal Automated Test Suites
+
+The core telematics algorithms (`TelematicsEngine`, `SpeedWatcher`, `SpeedometerService`) are covered by comprehensive JVM unit tests using **Robolectric** and **JUnit4**:
+
+```kotlin
+// Source: speed-core/src/test/kotlin/com/vegsahayyak/speedcore/domain/TelematicsEngineTest.kt
+package com.vegsahayyak.speedcore.domain
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class TelematicsEngineTest {
+
+    private fun assertSustainedSpeed(engine: TelematicsEngine, speedKmh: Float): TelematicsResult {
+        var result: TelematicsResult? = null
+        // Call processLocation multiple times to allow Exponential Moving Average (EMA) to converge
+        repeat(15) {
+            result = engine.processLocation(speedKmh / 3.6f, 10f)
+        }
+        return result!!
+    }
+
+    @Test
+    fun `isOverLimit triggers hysteresis correctly`() {
+        val engine = TelematicsEngine()
+        engine.setWarningThresholdMps(100f / 3.6f)
+
+        // Below limit (90 km/h) -> No alert
+        var result = assertSustainedSpeed(engine, 90f)
+        assertFalse(result.isOverLimit)
+
+        // Exceeds limit by 2 km/h (102 km/h) -> Triggers alert
+        result = assertSustainedSpeed(engine, 102f)
+        assertTrue(result.isOverLimit)
+
+        // Drops to limit (100 km/h) -> Still true due to hysteresis (-3 km/h buffer)
+        result = assertSustainedSpeed(engine, 100f)
+        assertTrue(result.isOverLimit)
+
+        // Drops below hysteresis threshold (96 km/h < 97 km/h) -> Clears alert
+        result = assertSustainedSpeed(engine, 96f)
+        assertFalse(result.isOverLimit)
+    }
+
+    @Test
+    fun `isUnderLimit triggers hysteresis correctly`() {
+        val engine = TelematicsEngine()
+        engine.setMinWarningThresholdMps(50f / 3.6f)
+
+        // Above minimum (60 km/h) -> No alert
+        var result = assertSustainedSpeed(engine, 60f)
+        assertFalse(result.isUnderLimit)
+
+        // Drops below minimum by 2 km/h (48 km/h) -> Triggers under-speed alert
+        result = assertSustainedSpeed(engine, 48f)
+        assertTrue(result.isUnderLimit)
+
+        // Rises above hysteresis threshold (54 km/h > 53 km/h) -> Clears alert
+        result = assertSustainedSpeed(engine, 54f)
+        assertFalse(result.isUnderLimit)
+    }
+}
+```
+
+Run test suites locally:
+
+```bash
+./gradlew testDebugUnitTest --info
+```
+
+---
+
+## 📊 3. Code Coverage Targets
+
+The SDK enforces a strict **90%+ coverage bar** on all domain logic:
+
+* **Domain & Telematics Logic (`TelematicsEngine`)**: 100% branch coverage.
+* **Location Signal Filtering (`SpeedWatcher`)**: 96% coverage.
+* **Unit Conversions (`SpeedUnit`)**: 100% coverage.
+* **Preferences & Service Locator**: 91% coverage.
+
+Test results are uploaded via `mikepenz/action-junit-report@v4` on every pipeline run.
+
+---
+
+## 🚀 4. Automated Release & Maven Publishing
+
+When a GitHub Release tag is published, `.github/workflows/publish-sdk.yml` automatically triggers:
+
+```bash
+./gradlew publish
+```
+
+This compiles and publishes the release artifacts to **GitHub Packages**:
+* `com.vegsahayyak:speed-bom:2.1.0` (Bill of Materials)
+* `com.vegsahayyak:speed-core:2.1.0` (Telematics Engine, Colors & Service)
+* `com.vegsahayyak:speed-ui:2.1.0` (Jetpack Compose UI, HUD Mode & Themes)
+* `com.vegsahayyak:speed-overlay:2.1.0` (Floating PiP Overlay Widget)
+* `com.vegsahayyak:speed-autostart:2.1.0` (Activity Recognition Autostart)
+
+
+--- END OF FILE: standards/05_CICD_AND_RELEASE_PIPELINE.md ---
+
+
+--- START OF FILE: troubleshooting/index.md ---
+
+# Troubleshooting & Common Edge Cases
+
+Find solutions to common integration hurdles, Android OEM background battery killers, and QA testing strategies for the **Veg Sahayyak SDK**.
+
+---
+
+## 🛑 1. `ForegroundServiceStartNotAllowedException`
+
+### Symptoms
+App crashes on **Android 12+ (API 31+)** when calling `SpeedAssistant.with(context).start()` while the app is in the background.
+
+```
+Fatal Exception: android.app.ForegroundServiceStartNotAllowedException: 
+Service.startForeground() not allowed due to mAllowStartForeground false
+```
+
+### Cause
+Android 12 strictly forbids starting foreground services while an application is in the background, with limited exceptions (e.g. high-priority FCM pushes, exact alarms).
+
+### Solution
+Always invoke `start()` from an active foreground component (`Activity` or user interaction button), or verify `isAppInForeground`:
+
+```kotlin
+// Ensure start() is called when the driver is actively interacting with the UI
+fun onStartTrackingClicked(activity: Activity) {
+    if (SpeedPermissions(activity).hasPermission()) {
+        SpeedAssistant.with(activity).start()
+    } else {
+        requestPermissions(activity)
+    }
+}
+```
+
+---
+
+## 🔋 2. OEM Background Kills (Samsung, Xiaomi, Oppo)
+
+### Symptoms
+The status bar speed notification disappears or freezes after the device screen has been turned off for several minutes.
+
+### Cause
+Proprietary battery savers (Samsung Device Care, Xiaomi MIUI Battery Saver, Huawei PowerGenie) forcefully terminate background processes even if they run as foreground services.
+
+### Solutions
+1. **AutoStartManager (Recommended)**: Use the `:speed-autostart` module to leverage Google Play Services `IN_VEHICLE` transitions, which OEMs typically exempt from termination because they rely on the low-power sensor hub instead of CPU wakelocks.
+2. **Request Battery Optimization Exemption**: Direct drivers to allow unconstrained background execution:
+   ```kotlin
+   val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+       data = Uri.parse("package:${context.packageName}")
+   }
+   context.startActivity(intent)
+   ```
+3. **Screen-Off Throttling**: Configure the SDK to pause GPS during screen-off cycles if full background tracking is not strictly needed:
+   ```kotlin
+   SpeedAssistant.with(context).preferences.setUpdateWhileScreenOff(false)
+   ```
+
+---
+
+## 🛰️ 3. Simulating Telemetry in Android Emulator & Local QA
+
+Testing speed thresholds and alerts without a physical vehicle can be done using the following verified methods:
+
+### Option A: `FakeSpeedRepository` (Recommended for Local Dev & Tests)
+For instant, deterministic speed simulation in ViewModels and Compose UI without waiting for GPS locks, use the [FakeSpeedRepository](/guide/testing#2-synthetic-telematics-fixture-fakespeedrepository):
+
+```kotlin
+val fakeRepo = FakeSpeedRepository()
+SpeedAssistant.with(context).useRepository(fakeRepo).start()
+
+// Emit 95 km/h over-speed violation
+fakeRepo.emitSpeed(speedKmh = 95f, isOverLimit = true)
+```
+
+### Option B: Android Studio Emulator Extended Controls (GPX Route Playback)
+1. Open Emulator **Extended Controls (...)** &rarr; **Location**.
+2. Click **Routes** and load a `.gpx` or `.kml` GPS route file.
+3. Set playback speed to **1.0x** or **2.0x** and click **Play Route**.
+4. The emulator streams live GPS coordinates, allowing `FusedLocationProviderClient` and `SpeedGauge` to animate smoothly in real time.
+
+### Option C: `setMockLocation()` Instrumentation
+For programmatic end-to-end testing of `FusedLocationProviderClient` on test devices, see the [End-to-End GPS Mocking Guide](/guide/testing#5-end-to-end-gps-mocking-via-fusedlocationproviderclient).
+
+## 🏃 4. AutoStartManager Not Triggering
+
+### Symptoms
+Trips are not starting automatically when the driver begins driving.
+
+### Cause & Solution
+* **Missing Google Play Services**: `AutoStartManager` relies on the Google Play Services Activity Recognition API. If the device does not have Play Services installed (e.g., AOSP or Huawei HarmonyOS devices), the `onError` callback will trigger with an `ApiException`.
+* **Missing Permissions**: Ensure the `ACTIVITY_RECOGNITION` permission is granted (Android 10+).
+
+---
+
+## 🎙️ 5. Voice Command Parsing Fails
+
+### Symptoms
+The `VoiceCommandButton` spins or fails to parse actions like `VoiceAction.SetProfile`.
+
+### Cause & Solution
+* **Microphone Permission Denied**: Ensure `android.permission.RECORD_AUDIO` is requested and granted at runtime before launching the voice recognizer intent.
+* **No Internet Connection**: The default Android `SpeechRecognizer` requires an active internet connection on older API levels to perform transcription. Handle offline scenarios gracefully.
+
+---
+
+## ❓ FAQ
+
+### Does the SDK require Google Play Services?
+Yes. The SDK leverages Google's `FusedLocationProviderClient` for optimal battery efficiency, and `AutoStartManager` requires the Activity Recognition API.
+
+### Why doesn't the Minimum Speed alert fire immediately when starting from 0 km/h?
+The `TelematicsEngine` incorporates a startup safety guard. To prevent continuous, annoying alarms while parked, at stoplights, or pulling out of a driveway, the under-speed alert is only armed after the vehicle has initially accelerated past **MinLimit + 3.0 km/h**.
+
+### Can I override the default Notification layout?
+Yes. You can supply custom notification channels and actions by interacting with `SpeedAssistant.with(context).setWarningPendingIntent(...)`.
+
+
+
+--- END OF FILE: troubleshooting/index.md ---
+
+
+--- START OF FILE: ui-components/index.md ---
+
+# Jetpack Compose UI Components
+
+The `:speed-ui` module provides drop-in, hardware-accelerated Jetpack Compose widgets designed for automotive dashboards, driver safety HUDs, and telematics settings screens.
+
+---
+
+## 🏎️ The `SpeedGauge` Component
+
+`SpeedGauge` is a circular speedometer gauge rendering custom vector arcs, dynamic speed ticks, smoothed needle motion, and real-time GPS accuracy status.
+
+<InteractiveSpeedGauge :initialSpeed="55" :initialLimit="80" initialUnit="km/h" />
+
+---
+
+## 📦 Basic Usage
+
+```kotlin
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import com.vegsahayyak.speedui.components.SpeedGauge
+import com.vegsahayyak.speedui.components.ThemeMode
+import com.vegsahayyak.speedcore.units.SpeedUnit
+
+@Composable
+fun SpeedometerScreen(
+    currentSpeed: Float, 
+    warningLimit: Float = 80f,
+    minCorridorLimit: Float = 40f
+) {
+    SpeedGauge(
+        speed = currentSpeed,
+        warningSpeed = warningLimit,         // Maximum speed ceiling
+        minSpeedLimit = minCorridorLimit,    // Minimum highway corridor
+        isTrackingActive = true,
+        isOverLimit = currentSpeed > warningLimit,
+        themeMode = ThemeMode.DARK_GRAY,
+        unitLabel = "km/h",
+        showGpsAccuracy = true,
+        gpsAccuracyMeters = 3.5f,
+        onUnitSelected = { selectedIndex ->
+            // Handle unit change (e.g. km/h vs mph)
+        }
+    )
+}
+```
+
+---
+
+## ⚙️ Component Parameters Reference
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `speed` | `Float` | **Required** | Current instantaneous vehicle speed. |
+| `warningSpeed` | `Float` | **Required** | Maximum speed ceiling threshold. |
+| `isTrackingActive` | `Boolean` | **Required** | Whether GPS tracking is actively running or in standby. |
+| `isOverLimit` | `Boolean` | `false` | When true, renders red alert glowing tones and warning styles. |
+| `modifier` | `Modifier` | `Modifier` | Modifier to be applied to the gauge container. |
+| `minSpeedLimit` | `Float` | `0f` | Optional minimum speed corridor limit. |
+| `maxSpeed` | `Float` | `180f` | Maximum dial scale value (e.g. 180 for km/h, 120 for mph). |
+| `unitLabel` | `String` | `"km/h"` | Text label displayed beneath the digital readout. |
+| `unitOptions` | `List<UiSpeedUnit>` | `UiSpeedUnit.entries` | Supported selectable units dropdown options (`KMH`, `MPH`, `MPS`, `FPS`). |
+| `labelStep` | `Int` | `20` | Numeric interval between major dial tick marks. |
+| `onUnitSelected` | `((Int) -> Unit)?` | `null` | Callback triggered when the driver taps the unit selector. |
+| `themeMode` | `ThemeMode` | `ThemeMode.SYSTEM` | Color mode: `SYSTEM`, `DARK_GRAY`, `OLED_BLACK`, `HIGH_CONTRAST`. |
+| `colorScheme` | `SpeedUiColorScheme?` | `null` | Optional custom client branding color scheme. |
+| `showGpsAccuracy` | `Boolean` | `true` | Toggles the real-time GPS accuracy badge on/off. |
+| `gpsAccuracyMeters` | `Float` | `-1f` | Precision in meters (≤ 5m Good, ≤ 20m Fair, > 20m Weak). |
+| `isHudMirrored` | `Boolean` | `false` | When true, flips the gauge vertically for windshield reflection. |
+
+---
+
+## 🎨 Theme Modes & OLED Optimization
+
+The `SpeedGauge` supports built-in theme presets configured via the `ThemeMode` enum:
+
+```kotlin
+enum class ThemeMode {
+    SYSTEM,        // Automatically follows Android system Dark/Light mode
+    DARK_GRAY,     // Deep charcoal gray background with vibrant accents
+    OLED_BLACK,    // Pure true black (#000000) for maximum OLED battery savings
+    HIGH_CONTRAST, // Ultra-high visibility yellow/white accents for direct sunlight
+    HUD_MIRRORED   // Inverts and mirrors layout vertically for windshield projection
+}
+```
+
+---
+
+## 🎨 Custom Brand Color Schemes (`SpeedUiColorScheme`)
+
+You can supply fully customized color palettes to `SpeedGauge` and `HudDisplay`:
+
+```kotlin
+val myBrandColors = SpeedUiColorScheme(
+    safeColor = Color(0xFF00E676),
+    warningApproachColor = Color(0xFFFF9100),
+    overSpeedColor = Color(0xFFFF1744),
+    underSpeedColor = Color(0xFF00E5FF),
+    warningGlowColor = Color(0x88FF1744),
+    needleColor = Color(0xFF2979FF)
+)
+
+SpeedGauge(
+    speed = currentSpeed,
+    warningSpeed = 80f,
+    isTrackingActive = true,
+    colorScheme = myBrandColors
+)
+```
+
+---
+
+## 🌙 HUD Mode & Windshield Reflection (`HudDisplay`)
+
+The `HudDisplay` composable offers a dedicated, large-digit (120sp) night-driving display that reflects off a vehicle's windshield. It is strictly rendered against a pure OLED black (`#000000`) background to minimize battery drain and reduce peripheral glare distractions.
+
+```kotlin
+import com.vegsahayyak.speedui.components.HudDisplay
+import com.vegsahayyak.speedui.components.HudMirrorAxis
+import com.vegsahayyak.speedui.components.hudMirror
+
+// Dedicated digital HUD composable
+HudDisplay(
+    speed = currentSpeed,
+    warningSpeed = 80f,
+    minSpeedLimit = 40f,
+    isTrackingActive = true,
+    isMirrored = true,
+    unitLabel = "km/h",
+    onMirrorToggle = { isMirrored -> /* toggle state */ }
+)
+
+// Or mirror any Composable using the hudMirror modifier
+Box(modifier = Modifier.hudMirror(isMirrored = true, axis = HudMirrorAxis.VERTICAL)) {
+    SpeedGauge(speed = currentSpeed, warningSpeed = 80f, isTrackingActive = true)
+}
+```
+
+### High Contrast Mode for Daylight Driving
+
+When commercial drivers operate in bright, direct sunlight, enable `ThemeMode.HIGH_CONTRAST` to boost needle visibility:
+
+```kotlin
+SpeedGauge(
+    speed = currentSpeed,
+    warningSpeed = 80f,
+    isTrackingActive = true,
+    themeMode = ThemeMode.HIGH_CONTRAST
+)
+```
+
+## 🧩 Accessibility & Screen Readers
+
+`SpeedGauge` implements Android Accessibility semantics out-of-the-box via `SpeedGaugeTokens.contentDescriptionFor(...)`. Screen readers (TalkBack) will announce contextual updates such as:
+
+> *"Current speed 78 kilometers per hour, speed limit 80 kilometers per hour. Warning status: normal."*
+
+---
+
+## 🖼️ XML Layout & ViewBinding Interoperability
+
+If your project is built with traditional XML layouts, you can embed `SpeedGauge` directly using AndroidX `ComposeView`:
+
+```xml [res/layout/item_speedometer_card.xml]
+<androidx.compose.ui.platform.ComposeView
+    android:id="@+id/speedometerComposeView"
+    android:layout_width="match_parent"
+    android:layout_height="220dp" />
+```
+
+In your Activity or Fragment:
+
+```kotlin
+binding.speedometerComposeView.setContent {
+    SpeedGauge(
+        speed = currentSpeedKmh,
+        warningSpeed = 80f,
+        minSpeedLimit = 40f,
+        isTrackingActive = true,
+        isOverLimit = currentSpeedKmh > 80f
+    )
+}
+```
+
+---
+
+## 🪟 The `PipWidget` Component (`:speed-overlay`)
+
+`PipWidget` is a floating circular speedometer overlay designed to render over third-party applications (Google Maps, Waze, delivery apps) using `SYSTEM_ALERT_WINDOW`.
+
+```kotlin
+import com.vegsahayyak.speedoverlay.PipWidget
+import com.vegsahayyak.speedoverlay.PipWidgetConfig
+
+PipWidget(
+    speed = currentSpeed,
+    unitLabel = "km/h",
+    isOverLimit = isOverLimit,
+    isUnderLimit = isUnderLimit,
+    config = PipWidgetConfig(
+        size = 100.dp,
+        safeColor = Color(0xFF1FC95E),
+        warningColor = Color(0xFFE31D23)
+    )
+)
+```
+
+### `PipWidgetConfig` Parameters
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `size` | `Dp` | `100.dp` | Outer diameter of the circular floating bubble. |
+| `safeColor` | `Color` | `0xFF1FC95E` | Outer border color when driving within normal limits. |
+| `warningColor` | `Color` | `0xFFE31D23` | Outer border color during over-speed violations. |
+| `underSpeedColor` | `Color` | `0xFF29B6F6` | Outer border color during under-speed violations. |
+| `backgroundColor` | `Color` | `0x66000000` | Translucent glassmorphism background color. |
+| `speedTextSize` | `TextUnit` | `36.sp` | Digital speed readout typography size. |
+| `unitTextSize` | `TextUnit` | `14.sp` | Speed unit label typography size. |
+| `textColor` | `Color` | `Color.White` | Text color for speed digits and unit. |
+
+---
+
+## 🎙️ The `VoiceCommandButton` Component (`:speed-ui`)
+
+A Floating Action Button (FAB) that captures spoken audio from the driver and triggers speed limit adjustments hands-free.
+
+```kotlin
+import com.vegsahayyak.speedui.components.VoiceCommandButton
+import com.vegsahayyak.speedui.api.VoiceAction
+
+VoiceCommandButton(
+    // parser defaults to null (uses built-in internal parser)
+    onCommandParsed = { action ->
+        when (action) {
+            is VoiceAction.SetProfile -> {
+                SpeedAssistant.with(context).setDrivingProfile(action.profile)
+            }
+            is VoiceAction.ChangeUnit -> {
+                println("Switched unit to: ${action.unitName}")
+            }
+            is VoiceAction.Unknown -> {
+                println("Unrecognized voice command")
+            }
+        }
+    }
+)
+```
+
+
+
+--- END OF FILE: ui-components/index.md ---
+
+
