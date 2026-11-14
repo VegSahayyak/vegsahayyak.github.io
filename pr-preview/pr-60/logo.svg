@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F2FE" />
+      <stop offset="100%" stop-color="#4FACFE" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38EF7D" />
+      <stop offset="100%" stop-color="#11998E" />
+    </linearGradient>
+    <linearGradient id="needleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF416C" />
+      <stop offset="100%" stop-color="#FF4B2B" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Speedometer Arc Track -->
+  <circle cx="60" cy="64" r="42" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="7" stroke-dasharray="22 88 153.9 0" stroke-linecap="round" />
+  
+  <!-- Ticks -->
+  <g stroke="rgba(255,255,255,0.3)" stroke-width="2" stroke-linecap="round">
+    <line x1="60" y1="32" x2="60" y2="28" transform="rotate(-120 60 64)" />
+    <line x1="60" y1="32" x2="60" y2="28" transform="rotate(-90 60 64)" />
+    <line x1="60" y1="32" x2="60" y2="28" transform="rotate(-60 60 64)" />
+    <line x1="60" y1="32" x2="60" y2="28" transform="rotate(-30 60 64)" />
+    <line x1="60" y1="32" x2="60" y2="28" transform="rotate(0 60 64)" />
+    <line x1="60" y1="32" x2="60" y2="28" transform="rotate(30 60 64)" />
+    <line x1="60" y1="32" x2="60" y2="28" transform="rotate(60 60 64)" />
+    <line x1="60" y1="32" x2="60" y2="28" transform="rotate(90 60 64)" />
+    <line x1="60" y1="32" x2="60" y2="28" transform="rotate(120 60 64)" />
+  </g>
+
+  <!-- Active Arc -->
+  <circle cx="60" cy="64" r="42" fill="none" stroke="url(#glowGrad)" stroke-width="7" stroke-dasharray="22 88 153.9 0" stroke-linecap="round" filter="url(#glow)" />
+
+  <!-- Center Hub -->
+  <circle cx="60" cy="64" r="10" fill="#151E33" stroke="url(#glowGrad)" stroke-width="2.5" />
+
+  <!-- Needle -->
+  <path d="M57.5 64 L59.5 28 C59.8 26.5 60.2 26.5 60.5 28 L62.5 64 Z" fill="url(#needleGrad)" transform="rotate(31.6 60 64)" filter="url(#glow)" />
+</svg>
