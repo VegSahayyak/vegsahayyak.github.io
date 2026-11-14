@@ -1,5 +1,8 @@
+Sitemap: https://vegsahayyak.github.io/sitemap.xml
+
 User-agent: *
 Allow: /
+Disallow: /pr-preview/
 
 # Dedicated AI Agent Crawlers
 User-agent: GPTBot
